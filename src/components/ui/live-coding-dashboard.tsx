@@ -164,9 +164,6 @@ type CompetitiveInsight = {
   totalSolved: number;
 };
 
-
-
-
 const platformLabels: Record<string, string> = {
   leetcode: "LeetCode",
   codeforces: "Codeforces",
@@ -260,6 +257,88 @@ type HeatmapMonth = {
   weeks: Array<Array<HeatmapDay | null>>;
 };
 
+type GithubDay = {
+  date: string;
+  contributionCount: number;
+  color?: string;
+};
+
+type GithubHeatmapMonth = {
+  key: string;
+  label: string;
+  weeks: Array<Array<GithubDay | null>>;
+};
+
+function buildGithubHeatmapMonths(weeksArray: any[]): GithubHeatmapMonth[] {
+  if (!weeksArray || weeksArray.length === 0) return [];
+
+  const allDays: GithubDay[] = [];
+  for (const w of weeksArray) {
+    if (w?.contributionDays) {
+      allDays.push(...w.contributionDays);
+    }
+  }
+
+  if (allDays.length === 0) return [];
+
+  const monthGroups = new Map<string, GithubDay[]>();
+  for (const day of allDays) {
+    const d = new Date(day.date);
+    if (Number.isNaN(d.getTime())) continue;
+    const groupKey = `${d.getFullYear()}-${d.getMonth()}`;
+    if (!monthGroups.has(groupKey)) {
+      monthGroups.set(groupKey, []);
+    }
+    monthGroups.get(groupKey)!.push(day);
+  }
+
+  const generatedMonths: GithubHeatmapMonth[] = [];
+
+  for (const [key, daysInMonth] of monthGroups.entries()) {
+    if (daysInMonth.length === 0) continue;
+
+    daysInMonth.sort((a, b) => a.date.localeCompare(b.date));
+
+    const firstDayObj = new Date(daysInMonth[0].date);
+    const monthLabel = firstDayObj.toLocaleDateString(undefined, { month: "short" });
+    
+    const weeks: Array<Array<GithubDay | null>> = [];
+    let currentWeek: Array<GithubDay | null> = [];
+
+    const startingDayOfWeek = firstDayObj.getDay();
+    for (let i = 0; i < startingDayOfWeek; i++) {
+      currentWeek.push(null);
+    }
+
+    for (const day of daysInMonth) {
+      currentWeek.push(day);
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
+    }
+
+    if (currentWeek.length > 0) {
+      while (currentWeek.length < 7) {
+        currentWeek.push(null);
+      }
+      weeks.push(currentWeek);
+    }
+
+    generatedMonths.push({
+      key,
+      label: monthLabel,
+      weeks,
+    });
+  }
+
+  return generatedMonths.sort((a, b) => {
+    const [yearA, monthA] = a.key.split("-").map(Number);
+    const [yearB, monthB] = b.key.split("-").map(Number);
+    return yearA !== yearB ? yearA - yearB : monthA - monthB;
+  });
+}
+
 function buildHeatmapMonthsByRange(
   activityByDay: Map<string, number>,
   start: Date,
@@ -344,9 +423,7 @@ export const CodingDashboard: React.FC = () => {
   const [heatmapPage, setHeatmapPage] = useState(0);
   const [activeView, setActiveView] = useState<"dashboard" | "github">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-
   const [showProfileCard, setShowProfileCard] = useState(false);
-
 
   const handleDownloadCard = async () => {
     const card = document.getElementById("profile-card");
@@ -359,29 +436,11 @@ export const CodingDashboard: React.FC = () => {
     link.click();
   };
 
-  // const handleNativeShare = async () => {
-  //   const card = document.getElementById("profile-card");
-  //   if (!card) return;
-
-  //   const blob = await htmlToImage.toBlob(card);
-
-  //   if (navigator.canShare && blob) {
-  //     navigator.share({
-  //       files: [new File([blob], "profile-card.png", { type: "image/png" })],
-  //       title: "My Coding Profile",
-  //     });
-  //   } else {
-  //     alert("Sharing not supported on this device.");
-  //   }
-  // };
-
   const handleNativeShare = async () => {
     const card = document.getElementById("profile-card");
     if (!card) return;
 
     const blob = await htmlToImage.toBlob(card);
-
-    // Guard clause to ensure blob was successfully created
     if (!blob) {
       console.error("Failed to generate image blob.");
       return;
@@ -392,13 +451,10 @@ export const CodingDashboard: React.FC = () => {
       title: "My Coding Profile",
     };
 
-    // 1. Check if the method exists on the navigator object
-    // 2. Call the method with the data to see if the browser supports sharing it
     if ('canShare' in navigator && navigator.canShare(shareData)) {
       try {
         await navigator.share(shareData);
       } catch (error) {
-        // Handle cases where the user cancels the share dialog
         console.error("Error sharing or share cancelled:", error);
       }
     } else {
@@ -443,6 +499,7 @@ export const CodingDashboard: React.FC = () => {
 
   const githubStats = stats?.github?.success ? stats.github : null;
   const totalQuestions = stats?.totalSolved ?? 0;
+
   const profileLinks = useMemo(() => {
     const links = codingStats
       .map((entry) => ({
@@ -466,6 +523,10 @@ export const CodingDashboard: React.FC = () => {
 
     return links;
   }, [codingStats, githubStats]);
+
+  const githubMonths = useMemo(() => {
+    return buildGithubHeatmapMonths(githubStats?.contributionCalendar?.weeks ?? []);
+  }, [githubStats]);
 
   const gfgStats = useMemo(
     () => codingStats.find((entry) => entry.platform === "gfg") ?? null,
@@ -800,21 +861,6 @@ export const CodingDashboard: React.FC = () => {
                   </h1>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* <Button
-                    size="icon"
-                    variant="outline"
-                    className="rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  >
-                    <Bell className="h-4 w-4" />
-                  </Button>
-                  <div className="flex h-10 min-w-[220px] items-center gap-2 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 px-3">
-                    <Search className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="Search something"
-                      className="w-full bg-transparent text-sm text-zinc-700 dark:text-zinc-200 outline-none placeholder:text-zinc-400 dark:placeholder:text-zinc-500"
-                    />
-                  </div>*/}
                   <Button
                     variant="outline"
                     className="gap-2 rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
@@ -823,8 +869,6 @@ export const CodingDashboard: React.FC = () => {
                     <Share2 className="h-4 w-4" />
                     Share
                   </Button>
-
-
                 </div>
               </div>
             </div>
@@ -963,30 +1007,52 @@ export const CodingDashboard: React.FC = () => {
                       <CardContent>
                         {githubStats.contributionCalendar ? (
                           <>
-                            <ScrollArea className="w-full">
-                              <div className="min-w-[760px] pb-2">
-                                <div className="flex gap-1">
-                                  {githubStats.contributionCalendar.weeks.map((week, weekIndex) => (
-                                    <div key={`github-week-${weekIndex}`} className="flex flex-col gap-1">
-                                      {week.contributionDays.map((day) => (
-                                        <Tooltip key={day.date}>
-                                          <TooltipTrigger asChild>
-                                            <div
-                                              className={`h-3.5 w-3.5 rounded-sm ${getGithubHeatColorLevel(day.contributionCount)}`}
-                                            />
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            <p className="text-xs">
-                                              {formatDatePretty(day.date)}: {day.contributionCount} contributions
-                                            </p>
-                                          </TooltipContent>
-                                        </Tooltip>
+                            {/* Native Horizontal Custom Scrollbar Canvas Container */}
+                            <div className="w-full overflow-x-auto rounded-xl border border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/20 p-4 
+                              [&::-webkit-scrollbar]:h-2 
+                              [&::-webkit-scrollbar-track]:bg-transparent 
+                              [&::-webkit-scrollbar-thumb]:rounded-full 
+                              [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-800 
+                              hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                              
+                              <div className="flex gap-6 pb-2 pt-1 min-w-max">
+                                {githubMonths.map((month) => (
+                                  <div key={month.key} className="flex flex-col space-y-2 shrink-0">
+                                    <div className="flex gap-1">
+                                      {month.weeks.map((week, weekIndex) => (
+                                        <div key={`${month.key}-week-${weekIndex}`} className="flex flex-col gap-1">
+                                          {week.map((day, dayIndex) =>
+                                            day ? (
+                                              <Tooltip key={day.date}>
+                                                <TooltipTrigger asChild>
+                                                  <div
+                                                    className={`h-3.5 w-3.5 rounded-[3px] transition-all duration-200 hover:scale-110 ${getGithubHeatColorLevel(day.contributionCount)}`}
+                                                  />
+                                                </TooltipTrigger>
+                                                <TooltipContent>
+                                                  <p className="text-xs">
+                                                    {formatDatePretty(day.date)}: {day.contributionCount} contributions
+                                                  </p>
+                                                </TooltipContent>
+                                              </Tooltip>
+                                            ) : (
+                                              <div
+                                                key={`${month.key}-empty-${weekIndex}-${dayIndex}`}
+                                                className="h-3.5 w-3.5 rounded-[3px] opacity-0"
+                                              />
+                                            )
+                                          )}
+                                        </div>
                                       ))}
                                     </div>
-                                  ))}
-                                </div>
+                                    <p className="text-center text-[11px] font-semibold tracking-wider text-zinc-500 dark:text-zinc-400 uppercase pt-1 select-none">
+                                      {month.label}
+                                    </p>
+                                  </div>
+                                ))}
                               </div>
-                            </ScrollArea>
+                            </div>
+                            
                             <Separator className="my-4 bg-zinc-200 dark:bg-zinc-800" />
                             <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                               <span>Less</span>
@@ -1086,7 +1152,6 @@ export const CodingDashboard: React.FC = () => {
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-zinc-500 dark:text-zinc-400">{relativeUpdateLabel}</span>
-
                   </div>
                 </div>
 
@@ -1273,7 +1338,7 @@ export const CodingDashboard: React.FC = () => {
                               size="sm"
                               variant="outline"
                               className="rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                              onClick={() => setHeatmapPage(0)}
+                              onClick={() => setHeatmapPage(0) }
                             >
                               Newer
                             </Button>
@@ -1291,44 +1356,50 @@ export const CodingDashboard: React.FC = () => {
                       </div>
                     </CardHeader>
                     <CardContent>
-                      <ScrollArea className="w-full">
-                        <div className="min-w-[680px] pb-3">
-                          <div className="flex items-end gap-4">
-                            {heatmapMonths.map((month) => (
-                              <div key={month.key} className="space-y-2">
-                                <div className="flex gap-1">
-                                  {month.weeks.map((week, weekIndex) => (
-                                    <div key={`${month.key}-week-${weekIndex}`} className="flex flex-col gap-1">
-                                      {week.map((day, dayIndex) =>
-                                        day ? (
-                                          <Tooltip key={day.date}>
-                                            <TooltipTrigger asChild>
-                                              <div className={`h-3.5 w-3.5 rounded-[3px] ${getHeatColorLevel(day.submissions)}`} />
-                                            </TooltipTrigger>
-                                            <TooltipContent>
-                                              <p className="text-xs">
-                                                {formatDatePretty(day.date)}: {day.submissions} submissions
-                                              </p>
-                                            </TooltipContent>
-                                          </Tooltip>
-                                        ) : (
-                                          <div
-                                            key={`${month.key}-empty-${weekIndex}-${dayIndex}`}
-                                            className="h-3.5 w-3.5 rounded-[3px] opacity-0"
-                                          />
-                                        ),
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                                <p className="text-center text-sm font-medium text-zinc-500 dark:text-zinc-400">
-                                  {month.label}
-                                </p>
+                      {/* Native Horizontal Custom Scrollbar Canvas Container for Platform Submission Heatmap */}
+                      <div className="w-full overflow-x-auto rounded-xl border border-zinc-100 dark:border-zinc-800/50 bg-zinc-50/50 dark:bg-zinc-900/20 p-4 
+                        [&::-webkit-scrollbar]:h-2 
+                        [&::-webkit-scrollbar-track]:bg-transparent 
+                        [&::-webkit-scrollbar-thumb]:rounded-full 
+                        [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-800 
+                        hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
+                        
+                        <div className="flex gap-6 pb-2 pt-1 min-w-max">
+                          {heatmapMonths.map((month) => (
+                            <div key={month.key} className="flex flex-col space-y-2 shrink-0">
+                              <div className="flex gap-1">
+                                {month.weeks.map((week, weekIndex) => (
+                                  <div key={`${month.key}-week-${weekIndex}`} className="flex flex-col gap-1">
+                                    {week.map((day, dayIndex) =>
+                                      day ? (
+                                        <Tooltip key={day.date}>
+                                          <TooltipTrigger asChild>
+                                            <div className={`h-3.5 w-3.5 rounded-[3px] transition-all duration-200 hover:scale-110 ${getHeatColorLevel(day.submissions)}`} />
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            <p className="text-xs">
+                                              {formatDatePretty(day.date)}: {day.submissions} submissions
+                                            </p>
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      ) : (
+                                        <div
+                                          key={`${month.key}-empty-${weekIndex}-${dayIndex}`}
+                                          className="h-3.5 w-3.5 rounded-[3px] opacity-0"
+                                        />
+                                      )
+                                    )}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                              <p className="text-center text-[11px] font-semibold tracking-wider text-zinc-500 dark:text-zinc-400 uppercase pt-1 select-none">
+                                {month.label}
+                              </p>
+                            </div>
+                          ))}
                         </div>
-                      </ScrollArea>
+                      </div>
+
                       <Separator className="my-4 bg-zinc-200 dark:bg-zinc-800" />
                       <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
                         <span>Less</span>
@@ -1459,12 +1530,10 @@ export const CodingDashboard: React.FC = () => {
 
       {showProfileCard && (
         <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-
           <div
             id="profile-card"
             className="relative w-[350px] rounded-2xl bg-[#111] text-white p-6 h-full overflow-auto shadow-2xl border border-zinc-700"
           >
-            {/* Close Button */}
             <button
               className="absolute top-3 right-3 bg-white/10 p-2 rounded-full hover:bg-white/20"
               onClick={() => setShowProfileCard(false)}
@@ -1472,7 +1541,6 @@ export const CodingDashboard: React.FC = () => {
               <X className="h-5 w-5" />
             </button>
 
-            {/* Avatar */}
             <div className="flex justify-center">
               <div className="h-25 w-25 rounded-full overflow-hidden border-4 border-amber-400">
                 <img
@@ -1483,26 +1551,22 @@ export const CodingDashboard: React.FC = () => {
               </div>
             </div>
 
-            {/* Name & Username */}
             <div className="mt-4 text-center">
               <p className="text-xl font-semibold">{githubStats?.name || "User"}</p>
               <p className="text-zinc-400">@{githubStats?.handle}</p>
             </div>
 
-            {/* Stats section */}
             <div className="mt-6 grid grid-cols-2 gap-3 text-center">
               <div className="bg-white/10 rounded-xl py-4">
                 <p className="text-sm text-zinc-400">Questions Solved</p>
                 <p className="text-3xl font-bold">{totalQuestions}</p>
               </div>
-
               <div className="bg-white/10 rounded-xl py-4">
                 <p className="text-sm text-zinc-400">Active Days</p>
                 <p className="text-3xl font-bold">{totalActiveDays}</p>
               </div>
             </div>
 
-            {/* Platforms */}
             <div className="mt-4 bg-white/10 rounded-xl p-2 text-center text-sm">
               <p className="text-zinc-400 mb-3">Profile links</p>
               <div className="space-y-2 flex flex-wrap text-left">
@@ -1528,19 +1592,8 @@ export const CodingDashboard: React.FC = () => {
                   </p>
                 )}
               </div>
-              <div className="hidden">
-                {codingStats.map((p) => (
-                  <span key={p.platform} title={formatPlatformName(p.platform)}>
-                    {p.platform === "leetcode" && "🟧"}
-                    {p.platform === "codeforces" && "🔵"}
-                    {p.platform === "gfg" && "🟢"}
-                    {p.platform === "codechef" && "⚪"}
-                  </span>
-                ))}
-              </div>
             </div>
 
-            {/* Buttons */}
             <div className="mt-6 flex justify-between">
               <Button
                 variant="secondary"
@@ -1549,7 +1602,6 @@ export const CodingDashboard: React.FC = () => {
               >
                 Download
               </Button>
-
               <Button
                 variant="secondary"
                 className="bg-white/20 text-white hover:bg-white/30"
@@ -1561,8 +1613,6 @@ export const CodingDashboard: React.FC = () => {
           </div>
         </div>
       )}
-
-
     </TooltipProvider>
   );
 };
