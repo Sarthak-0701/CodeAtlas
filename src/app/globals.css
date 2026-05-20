@@ -81,16 +81,16 @@ body {
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
-body::-webkit-scrollbar{
+body::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-button{
+button {
   cursor: pointer;
 
 }
 
-button:active{
+button:active {
   transform: scale(0.97);
 }

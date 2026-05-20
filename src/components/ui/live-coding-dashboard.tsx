@@ -332,7 +332,7 @@ function getGithubHeatColorLevel(contributions: number): string {
   return "bg-emerald-700 dark:bg-emerald-500";
 }
 
-export const SalesDashboard: React.FC = () => {
+export const CodingDashboard: React.FC = () => {
   const router = useRouter();
   const supabase = createClient();
 
@@ -348,63 +348,63 @@ export const SalesDashboard: React.FC = () => {
   const [showProfileCard, setShowProfileCard] = useState(false);
 
 
-const handleDownloadCard = async () => {
-  const card = document.getElementById("profile-card");
-  if (!card) return;
+  const handleDownloadCard = async () => {
+    const card = document.getElementById("profile-card");
+    if (!card) return;
 
-  const dataUrl = await htmlToImage.toPng(card);
-  const link = document.createElement("a");
-  link.download = "profile-card.png";
-  link.href = dataUrl;
-  link.click();
-};
-
-// const handleNativeShare = async () => {
-//   const card = document.getElementById("profile-card");
-//   if (!card) return;
-
-//   const blob = await htmlToImage.toBlob(card);
-
-//   if (navigator.canShare && blob) {
-//     navigator.share({
-//       files: [new File([blob], "profile-card.png", { type: "image/png" })],
-//       title: "My Coding Profile",
-//     });
-//   } else {
-//     alert("Sharing not supported on this device.");
-//   }
-// };
-
-const handleNativeShare = async () => {
-  const card = document.getElementById("profile-card");
-  if (!card) return;
-
-  const blob = await htmlToImage.toBlob(card);
-  
-  // Guard clause to ensure blob was successfully created
-  if (!blob) {
-    console.error("Failed to generate image blob.");
-    return;
-  }
-
-  const shareData = {
-    files: [new File([blob], "profile-card.png", { type: "image/png" })],
-    title: "My Coding Profile",
+    const dataUrl = await htmlToImage.toPng(card);
+    const link = document.createElement("a");
+    link.download = "profile-card.png";
+    link.href = dataUrl;
+    link.click();
   };
 
-  // 1. Check if the method exists on the navigator object
-  // 2. Call the method with the data to see if the browser supports sharing it
-  if ('canShare' in navigator && navigator.canShare(shareData)) {
-    try {
-      await navigator.share(shareData);
-    } catch (error) {
-      // Handle cases where the user cancels the share dialog
-      console.error("Error sharing or share cancelled:", error);
+  // const handleNativeShare = async () => {
+  //   const card = document.getElementById("profile-card");
+  //   if (!card) return;
+
+  //   const blob = await htmlToImage.toBlob(card);
+
+  //   if (navigator.canShare && blob) {
+  //     navigator.share({
+  //       files: [new File([blob], "profile-card.png", { type: "image/png" })],
+  //       title: "My Coding Profile",
+  //     });
+  //   } else {
+  //     alert("Sharing not supported on this device.");
+  //   }
+  // };
+
+  const handleNativeShare = async () => {
+    const card = document.getElementById("profile-card");
+    if (!card) return;
+
+    const blob = await htmlToImage.toBlob(card);
+
+    // Guard clause to ensure blob was successfully created
+    if (!blob) {
+      console.error("Failed to generate image blob.");
+      return;
     }
-  } else {
-    alert("Sharing not supported on this device.");
-  }
-};
+
+    const shareData = {
+      files: [new File([blob], "profile-card.png", { type: "image/png" })],
+      title: "My Coding Profile",
+    };
+
+    // 1. Check if the method exists on the navigator object
+    // 2. Call the method with the data to see if the browser supports sharing it
+    if ('canShare' in navigator && navigator.canShare(shareData)) {
+      try {
+        await navigator.share(shareData);
+      } catch (error) {
+        // Handle cases where the user cancels the share dialog
+        console.error("Error sharing or share cancelled:", error);
+      }
+    } else {
+      alert("Sharing not supported on this device.");
+    }
+  };
 
   useEffect(() => {
     let alive = true;
@@ -718,8 +718,8 @@ const handleNativeShare = async () => {
               <div className="space-y-2">
                 <button
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${activeView === "dashboard"
-                      ? "border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 font-semibold text-zinc-900 dark:text-zinc-100"
-                      : "text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+                    ? "border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 font-semibold text-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
                     }`}
                   onClick={() => {
                     setActiveView("dashboard");
@@ -754,8 +754,8 @@ const handleNativeShare = async () => {
               <div className="space-y-2">
                 <button
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${activeView === "github"
-                      ? "border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 font-semibold text-zinc-900 dark:text-zinc-100"
-                      : "text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+                    ? "border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 font-semibold text-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
                     }`}
                   onClick={() => {
                     setActiveView("github");
@@ -824,7 +824,7 @@ const handleNativeShare = async () => {
                     Share
                   </Button>
 
-                  
+
                 </div>
               </div>
             </div>
@@ -1457,110 +1457,110 @@ const handleNativeShare = async () => {
         </div>
       </div>
 
-            {showProfileCard && (
-              <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-                
-                <div
-                  id="profile-card"
-                  className="relative w-[350px] rounded-2xl bg-[#111] text-white p-6 h-full overflow-auto shadow-2xl border border-zinc-700"
-                >
-                  {/* Close Button */}
-                  <button
-                    className="absolute top-3 right-3 bg-white/10 p-2 rounded-full hover:bg-white/20"
-                    onClick={() => setShowProfileCard(false)}
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+      {showProfileCard && (
+        <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
 
-                  {/* Avatar */}
-                  <div className="flex justify-center">
-                    <div className="h-25 w-25 rounded-full overflow-hidden border-4 border-amber-400">
-                      <img
-                        src={githubStats?.avatar || "/placeholder.png"}
-                        alt="avatar"
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                  </div>
+          <div
+            id="profile-card"
+            className="relative w-[350px] rounded-2xl bg-[#111] text-white p-6 h-full overflow-auto shadow-2xl border border-zinc-700"
+          >
+            {/* Close Button */}
+            <button
+              className="absolute top-3 right-3 bg-white/10 p-2 rounded-full hover:bg-white/20"
+              onClick={() => setShowProfileCard(false)}
+            >
+              <X className="h-5 w-5" />
+            </button>
 
-                  {/* Name & Username */}
-                  <div className="mt-4 text-center">
-                    <p className="text-xl font-semibold">{githubStats?.name || "User"}</p>
-                    <p className="text-zinc-400">@{githubStats?.handle}</p>
-                  </div>
-
-                  {/* Stats section */}
-                  <div className="mt-6 grid grid-cols-2 gap-3 text-center">
-                    <div className="bg-white/10 rounded-xl py-4">
-                      <p className="text-sm text-zinc-400">Questions Solved</p>
-                      <p className="text-3xl font-bold">{totalQuestions}</p>
-                    </div>
-
-                    <div className="bg-white/10 rounded-xl py-4">
-                      <p className="text-sm text-zinc-400">Active Days</p>
-                      <p className="text-3xl font-bold">{totalActiveDays}</p>
-                    </div>
-                  </div>
-
-                  {/* Platforms */}
-                  <div className="mt-4 bg-white/10 rounded-xl p-2 text-center text-sm">
-                    <p className="text-zinc-400 mb-3">Profile links</p>
-                    <div className="space-y-2 flex flex-wrap text-left">
-                      {profileLinks.length > 0 ? (
-                        profileLinks.map((link) => (
-                          <a
-                            key={`${link.platform}-${link.handle}`}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex w-1/2 items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-zinc-100 transition hover:border-white/25 hover:bg-white/10"
-                          >
-                            <span className="min-w-0">
-                              <span className="block text-sm font-semibold">{link.label}</span>
-                              <span className="block truncate text-xs text-zinc-400">@{link.handle}</span>
-                            </span>
-                            <ExternalLink className="h-4 w-4 shrink-0 text-zinc-400" />
-                          </a>
-                        ))
-                      ) : (
-                        <p className="text-center text-xs text-zinc-500">
-                          Add platform handles to show profile links.
-                        </p>
-                      )}
-                    </div>
-                    <div className="hidden">
-                      {codingStats.map((p) => (
-                        <span key={p.platform} title={formatPlatformName(p.platform)}>
-                          {p.platform === "leetcode" && "🟧"}
-                          {p.platform === "codeforces" && "🔵"}
-                          {p.platform === "gfg" && "🟢"}
-                          {p.platform === "codechef" && "⚪"}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Buttons */}
-                  <div className="mt-6 flex justify-between">
-                    <Button
-                      variant="secondary"
-                      className="bg-white/20 text-white hover:bg-white/30"
-                      onClick={handleDownloadCard}
-                    >
-                      Download
-                    </Button>
-
-                    <Button
-                      variant="secondary"
-                      className="bg-white/20 text-white hover:bg-white/30"
-                      onClick={handleNativeShare}
-                    >
-                      Share
-                    </Button>
-                  </div>
-                </div>
+            {/* Avatar */}
+            <div className="flex justify-center">
+              <div className="h-25 w-25 rounded-full overflow-hidden border-4 border-amber-400">
+                <img
+                  src={githubStats?.avatar || "/placeholder.png"}
+                  alt="avatar"
+                  className="h-full w-full object-cover"
+                />
               </div>
-            )}
+            </div>
+
+            {/* Name & Username */}
+            <div className="mt-4 text-center">
+              <p className="text-xl font-semibold">{githubStats?.name || "User"}</p>
+              <p className="text-zinc-400">@{githubStats?.handle}</p>
+            </div>
+
+            {/* Stats section */}
+            <div className="mt-6 grid grid-cols-2 gap-3 text-center">
+              <div className="bg-white/10 rounded-xl py-4">
+                <p className="text-sm text-zinc-400">Questions Solved</p>
+                <p className="text-3xl font-bold">{totalQuestions}</p>
+              </div>
+
+              <div className="bg-white/10 rounded-xl py-4">
+                <p className="text-sm text-zinc-400">Active Days</p>
+                <p className="text-3xl font-bold">{totalActiveDays}</p>
+              </div>
+            </div>
+
+            {/* Platforms */}
+            <div className="mt-4 bg-white/10 rounded-xl p-2 text-center text-sm">
+              <p className="text-zinc-400 mb-3">Profile links</p>
+              <div className="space-y-2 flex flex-wrap text-left">
+                {profileLinks.length > 0 ? (
+                  profileLinks.map((link) => (
+                    <a
+                      key={`${link.platform}-${link.handle}`}
+                      href={link.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex w-1/2 items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/25 px-3 py-2 text-zinc-100 transition hover:border-white/25 hover:bg-white/10"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold">{link.label}</span>
+                        <span className="block truncate text-xs text-zinc-400">@{link.handle}</span>
+                      </span>
+                      <ExternalLink className="h-4 w-4 shrink-0 text-zinc-400" />
+                    </a>
+                  ))
+                ) : (
+                  <p className="text-center text-xs text-zinc-500">
+                    Add platform handles to show profile links.
+                  </p>
+                )}
+              </div>
+              <div className="hidden">
+                {codingStats.map((p) => (
+                  <span key={p.platform} title={formatPlatformName(p.platform)}>
+                    {p.platform === "leetcode" && "🟧"}
+                    {p.platform === "codeforces" && "🔵"}
+                    {p.platform === "gfg" && "🟢"}
+                    {p.platform === "codechef" && "⚪"}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* Buttons */}
+            <div className="mt-6 flex justify-between">
+              <Button
+                variant="secondary"
+                className="bg-white/20 text-white hover:bg-white/30"
+                onClick={handleDownloadCard}
+              >
+                Download
+              </Button>
+
+              <Button
+                variant="secondary"
+                className="bg-white/20 text-white hover:bg-white/30"
+                onClick={handleNativeShare}
+              >
+                Share
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
 
     </TooltipProvider>
