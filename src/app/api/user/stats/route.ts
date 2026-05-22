@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/app/lib/supabase/server";
+import { redis, CACHE_TTL } from "@/app/lib/redis";
 
 import { fetchLeetCodeUserInfo } from "@/app/lib/services/leetcode";
 import { fetchCodeChefUserInfo } from "@/app/lib/services/codechef";
@@ -21,56 +22,71 @@ type GitHubStats = Awaited<ReturnType<typeof fetchGitHubUserInfo>>;
 
 export async function GET(request: Request) {
     try {
-        const supabase = await createClient()
+        const supabase = await createClient();
 
-        // verify user
-        const {data :{user}, error: authError} = await supabase.auth.getUser()
+        // 1. Verify user
+        const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-        if(authError || !user){
+        if (authError || !user) {
             return NextResponse.json({
                 success: false,
                 message: "Unauthorized access"
-            },{status:401})
+            }, { status: 401 });
         }
 
-        //fetch user saved handles
-        const {data: handles, error: handlesError} = await supabase
-        .from("platform_handles")
-        .select("platform_name, handle")
-        .eq("user_id", user.id)
+        // 2. Check Redis Cache
+        const cacheKey = `user:stats:${user.id}`;
+        try {
+            const cachedData = await redis.get(cacheKey);
+            if (cachedData) {
+                return NextResponse.json({
+                    success: true,
+                    isCached: true,
+                    data: cachedData
+                }, { status: 200 });
+            }
+        } catch (cacheErr) {
+            // Log error but fallback to normal fetching if Redis fails
+            console.error("Redis Read Error:", cacheErr);
+        }
 
-        if(handlesError) throw handlesError
+        // 3. Fetch user saved handles from Supabase on cache miss
+        const { data: handles, error: handlesError } = await supabase
+            .from("platform_handles")
+            .select("platform_name, handle")
+            .eq("user_id", user.id);
 
-        if(!handles || handles.length===0){
+        if (handlesError) throw handlesError;
+
+        if (!handles || handles.length === 0) {
             return NextResponse.json({
                 success: true,
                 message: "No handles connected yet",
-                data: {coding: [], github:null, totalSolved: 0}
-            },{status:200})
+                data: { coding: [], github: null, totalSolved: 0 }
+            }, { status: 200 });
         }
 
-        // process each handle using promise
-        const codingStats: CodingStats[] = []
-        let githubStats: GitHubStats | null = null
-        let totalSolved = 0
+        // Process each handle using promises concurrently
+        const codingStats: CodingStats[] = [];
+        let githubStats: GitHubStats | null = null;
+        let totalSolved = 0;
 
-        // an array of promises to fetch data simultaneously for speed 
-        const fetchPromises = handles.map(async (platform)=>{
-            const {platform_name, handle} = platform
+        const fetchPromises = handles.map(async (platform) => {
+            const { platform_name, handle } = platform;
 
             try {
-                if(platform_name==="leetcode"){
-                    const data = await fetchLeetCodeUserInfo(handle)
-                    if(data.success){
+                if (platform_name === "leetcode") {
+                    const data = await fetchLeetCodeUserInfo(handle);
+                    if (data.success) {
                         totalSolved += data.totalSolved || 0;
-                        codingStats.push(data)
+                        codingStats.push(data);
                     }
                 }
-                else if(platform_name==="codeforces"){
-                    const data = await fetchCodeforcesUserInfo(handle)
-                    if(data.success){
+                else if (platform_name === "codeforces") {
+                    const data = await fetchCodeforcesUserInfo(handle);
+                    if (data.success) {
                         totalSolved += data.totalSolved || 0;
-                        codingStats.push(data)
+                        codingStats.push(data);
                     }
                 }
                 else if (platform_name === "codechef") {
@@ -89,7 +105,7 @@ export async function GET(request: Request) {
                 else if (platform_name === "gfg") {
                     const data = await fetchGFGUserInfo(handle);
                     if (data.success) {
-                        totalSolved += data.totalSolved || 0; // GFG usually has total solved
+                        totalSolved += data.totalSolved || 0;
                         codingStats.push(data);
                     }
                 }
@@ -113,20 +129,33 @@ export async function GET(request: Request) {
                     error: "Data temporarily unavailable"
                 });
             }
-        })
-        // Wait for all platform fetches to complete
+        });
+
+        // Wait for all concurrent fetches to resolve
         await Promise.all(fetchPromises);
 
-        // Return the aggregated data
+        const aggregatedData = {
+            coding: codingStats,
+            github: githubStats,
+            totalSolved: totalSolved
+        };
+
+        // 4. Update Redis Cache with fresh aggregated data
+        try {
+            await redis.set(cacheKey, JSON.stringify(aggregatedData), {
+                ex: CACHE_TTL.USER_STATS
+            });
+        } catch (cacheErr) {
+            console.error("Redis Write Error:", cacheErr);
+        }
+
+        // Return the fresh aggregated data
         return NextResponse.json({
             success: true,
-            data: {
-                coding: codingStats,
-                github: githubStats,
-                totalSolved: totalSolved
-            }
+            isCached: false,
+            data: aggregatedData
         }, { status: 200 });
-        
+
     } catch (error) {
         console.error("Aggregation API Error:", error);
         return NextResponse.json(

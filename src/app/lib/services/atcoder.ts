@@ -4,12 +4,12 @@ type AtCoderHistoryEntry = {
 
 export async function fetchAtCoderUserInfo(handle: string) {
     try {
-        const response = await fetch(`https://atcoder.jp/users/${handle}/history/json`,{
-            next: {revalidate: 3600}
+        const response = await fetch(`https://atcoder.jp/users/${handle}/history/json`, {
+            next: { revalidate: 3600 }
         })
 
-        if(!response.ok){
-            if(response.status===404){
+        if (!response.ok) {
+            if (response.status === 404) {
                 throw new Error(`AtCoder user '${handle}' not found`)
             }
             throw new Error(`AtCoder API error: ${response.statusText}`)

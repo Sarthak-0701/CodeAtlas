@@ -56,15 +56,15 @@ function parseCodeChefSolvedCount($: cheerio.CheerioAPI): number {
 
 export async function fetchCodeChefUserInfo(handle: string) {
     try {
-        
-        const response = await fetch(`https://www.codechef.com/users/${handle}`,{
+
+        const response = await fetch(`https://www.codechef.com/users/${handle}`, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             },
-            next: {revalidate: 3600}
+            next: { revalidate: 3600 }
         })
 
-        if(!response.ok){
+        if (!response.ok) {
             throw new Error(`CodeChef profile for '${handle}' not found or unreachable`)
         }
 
@@ -76,7 +76,7 @@ export async function fetchCodeChefUserInfo(handle: string) {
         const ratingStr = $('.rating-number').text()
         const rating = parseInt(ratingStr) || 0
 
-        if(!ratingStr){
+        if (!ratingStr) {
             throw new Error(`Could not parse data for '${handle}'. Are you sure the handle is correct?`)
         }
 
