@@ -46,7 +46,6 @@ export async function GET(request: Request) {
                 }, { status: 200 });
             }
         } catch (cacheErr) {
-            // Log error but fallback to normal fetching if Redis fails
             console.error("Redis Read Error:", cacheErr);
         }
 
@@ -66,73 +65,75 @@ export async function GET(request: Request) {
             }, { status: 200 });
         }
 
-        // Process each handle using promises concurrently
-        const codingStats: CodingStats[] = [];
-        let githubStats: GitHubStats | null = null;
-        let totalSolved = 0;
-
+        // Process each handle cleanly without side-effect mutations
         const fetchPromises = handles.map(async (platform) => {
             const { platform_name, handle } = platform;
 
             try {
                 if (platform_name === "leetcode") {
                     const data = await fetchLeetCodeUserInfo(handle);
-                    if (data.success) {
-                        totalSolved += data.totalSolved || 0;
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "codeforces") {
+                if (platform_name === "codeforces") {
                     const data = await fetchCodeforcesUserInfo(handle);
-                    if (data.success) {
-                        totalSolved += data.totalSolved || 0;
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "codechef") {
+                if (platform_name === "codechef") {
                     const data = await fetchCodeChefUserInfo(handle);
-                    if (data.success) {
-                        totalSolved += data.totalSolved || 0;
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "atcoder") {
+                if (platform_name === "atcoder") {
                     const data = await fetchAtCoderUserInfo(handle);
-                    if (data.success) {
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "gfg") {
+                if (platform_name === "gfg") {
                     const data = await fetchGFGUserInfo(handle);
-                    if (data.success) {
-                        totalSolved += data.totalSolved || 0;
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "interviewbit") {
+                if (platform_name === "interviewbit") {
                     const data = await fetchInterviewBitUserInfo(handle);
-                    if (data.success) {
-                        codingStats.push(data);
-                    }
+                    return { type: "coding", data };
                 }
-                else if (platform_name === "github") {
+                if (platform_name === "github") {
                     const data = await fetchGitHubUserInfo(handle);
-                    if (data.success) {
-                        githubStats = data;
-                    }
+                    return { type: "github", data };
                 }
+                return null;
             } catch (error) {
                 console.error(`Failed to fetch stats for ${platform_name}:`, error);
-                codingStats.push({
-                    success: false,
-                    platform: platform_name,
-                    error: "Data temporarily unavailable"
-                });
+                return {
+                    type: "coding",
+                    data: {
+                        success: false,
+                        platform: platform_name,
+                        error: "Data temporarily unavailable"
+                    }
+                };
             }
         });
 
-        // Wait for all concurrent fetches to resolve
-        await Promise.all(fetchPromises);
+        // Wait for all concurrent fetches safely
+        const results = await Promise.all(fetchPromises);
+
+        const codingStats: CodingStats[] = [];
+        let githubStats: GitHubStats | null = null;
+        let totalSolved = 0;
+
+        // 4. Aggregate cleanly on a single synchronous thread loop
+        for (const item of results) {
+            if (!item) continue;
+
+            if (item.type === "github" && item.data?.success) {
+                githubStats = item.data as GitHubStats;
+            } else if (item.type === "coding") {
+                const codingData = item.data as CodingStats;
+                codingStats.push(codingData);
+
+                if (codingData.success && "totalSolved" in codingData) {
+                    totalSolved += codingData.totalSolved || 0;
+                }
+            }
+        }
 
         const aggregatedData = {
             coding: codingStats,
@@ -140,7 +141,7 @@ export async function GET(request: Request) {
             totalSolved: totalSolved
         };
 
-        // 4. Update Redis Cache with fresh aggregated data
+        // 5. Update Redis Cache
         try {
             await redis.set(cacheKey, JSON.stringify(aggregatedData), {
                 ex: CACHE_TTL.USER_STATS
@@ -149,7 +150,6 @@ export async function GET(request: Request) {
             console.error("Redis Write Error:", cacheErr);
         }
 
-        // Return the fresh aggregated data
         return NextResponse.json({
             success: true,
             isCached: false,
