@@ -1,18 +1,21 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react'; // 1. Added useRef
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '../lib/supabase/client';
 import AuthLayout from '@/components/AuthLayout';
+import HCaptcha from '@hcaptcha/react-hcaptcha'; // 2. Imported hCaptcha wrapper
 
 export default function SignInPage() {
   const router = useRouter();
   const [formData, setFormData] = useState({ email: '', password: '' });
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null); // 3. Added captcha state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [showPassword, setShowPassword] = useState(false); // UI Enhancement
+  const [showPassword, setShowPassword] = useState(false);
 
+  const captchaRef = useRef<HCaptcha>(null); // 4. Created ref to programmatically control captcha widget
   const supabase = createClient();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -21,6 +24,13 @@ export default function SignInPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 5. Enforce captcha check before submitting
+    if (!captchaToken) {
+      setError('Please complete the Captcha verification.');
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -28,7 +38,10 @@ export default function SignInPage() {
       const response = await fetch('/api/signin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          captchaToken, // 6. Passed token inside payload
+        }),
       });
 
       const data = await response.json();
@@ -37,9 +50,11 @@ export default function SignInPage() {
         router.push('/dashboard');
       } else {
         setError(data.message || 'Invalid email or password');
+        captchaRef.current?.resetCaptcha(); // Reset widget state on failure
       }
     } catch {
       setError('An unexpected error occurred. Please try again.');
+      captchaRef.current?.resetCaptcha(); // Reset widget state on error
     } finally {
       setLoading(false);
     }
@@ -155,6 +170,16 @@ export default function SignInPage() {
                 Forgot password?
               </Link>
             </div>
+          </div>
+
+          {/* 7. Added hCaptcha component DOM markup inside the form */}
+          <div className="flex justify-center py-2">
+            <HCaptcha
+              ref={captchaRef}
+              sitekey={process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY!}
+              onVerify={(token) => setCaptchaToken(token)}
+              onExpire={() => setCaptchaToken(null)}
+            />
           </div>
 
           {error && (

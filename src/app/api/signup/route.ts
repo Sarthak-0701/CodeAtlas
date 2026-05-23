@@ -8,17 +8,18 @@ export async function POST(request: Request) {
         const supabaseAdmin = getSupabaseAdmin();
 
         const body = await request.json();
-        const { username, email, password } = body;
+        // 1. Destructure captchaToken sent from front-end client
+        const { username, email, password, captchaToken } = body;
 
-        if (!username || !email || !password) {
+        if (!username || !email || !password || !captchaToken) {
             return NextResponse.json(
-                { success: false, message: "Invalid parameters" },
+                { success: false, message: "Invalid parameters. Verification missing." },
                 { status: 400 }
             );
         }
 
-        // --- NEW: Check if the username is already taken ---
-        const { data: existingUser } = await supabaseAdmin 
+        // Check if the username is already taken
+        const { data: existingUser } = await supabaseAdmin
             .from("users")
             .select("username")
             .eq("username", username)
@@ -31,9 +32,13 @@ export async function POST(request: Request) {
             );
         }
 
+        // 2. Pass options.captchaToken into Supabase Auth Configuration block
         const { data, error } = await supabase.auth.signUp({
             email,
             password,
+            options: {
+                captchaToken: captchaToken,
+            }
         });
 
         if (error) {

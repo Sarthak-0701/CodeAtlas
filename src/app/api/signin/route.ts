@@ -1,55 +1,47 @@
-import { NextResponse } from "next/server"
-import { createClient } from "@/app/lib/supabase/server"
-
+import { createClient } from "@/app/lib/supabase/server";
+import { NextResponse } from "next/server";
 
 export async function POST(request: Request) {
-    const supabase = await createClient()
     try {
-        const body = await request.json()
+        const supabase = await createClient();
+        const body = await request.json();
 
-        const { email, password } = body
+        // 1. Destructure captchaToken from the request body
+        const { email, password, captchaToken } = body;
 
-        if (!email || !password) {
+        if (!email || !password || !captchaToken) {
             return NextResponse.json(
-                {
-                    success: false,
-                    message: "Email and password required"
-                },
+                { success: false, message: "Invalid parameters. Verification missing." },
                 { status: 400 }
-            )
+            );
         }
 
+        // 2. Pass the captchaToken in the options object
         const { data, error } = await supabase.auth.signInWithPassword({
             email,
-            password
-        })
+            password,
+            options: {
+                captchaToken: captchaToken,
+            }
+        });
 
         if (error) {
             return NextResponse.json(
-                {
-                    success: false,
-                    message: error.message
-                },
-                { status: 401 }
-            )
+                { success: false, message: error.message },
+                { status: 400 }
+            );
         }
 
         return NextResponse.json(
-            {
-                success: true,
-                message: "Signin successful",
-                user: data.user
-            },
+            { success: true, message: "Login successful" },
             { status: 200 }
-        )
-
+        );
     } catch (error) {
+        console.log("Signin error", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
         return NextResponse.json(
-            {
-                success: false,
-                message: "Signin failed"
-            },
+            { success: false, message: "Signin failed", errorDetail: errorMessage },
             { status: 500 }
-        )
+        );
     }
 }
