@@ -15,7 +15,9 @@ import {
   Bell,
   BookOpenText,
   CalendarDays,
+  Check,
   Clock3,
+  Copy,
   FolderGit2,
   GitCompareArrows,
   Home,
@@ -75,7 +77,7 @@ type CodingPlatformStats = {
   rating?: number;
   maxRating?: number;
   contestRating?: number;
-  rank?: string | number;
+  rank?: string | number | null;
   stars?: string;
   score?: number;
   monthlyScore?: number;
@@ -138,6 +140,11 @@ type AggregatedStatsApi = {
     coding: CodingPlatformStats[];
     github: GitHubStats | null;
     totalSolved: number;
+    profile?: {
+      id: string;
+      username: string;
+      email?: string | null;
+    } | null;
   };
 };
 
@@ -174,6 +181,8 @@ const platformLabels: Record<string, string> = {
   interviewbit: "InterviewBit",
 };
 
+const DATE_LOCALE = "en-US";
+
 function formatPlatformName(platform: string): string {
   return platformLabels[platform] ?? platform.charAt(0).toUpperCase() + platform.slice(1);
 }
@@ -205,10 +214,11 @@ function getPlatformProfileUrl(platform: string, handle?: string): string | null
 function formatDatePretty(dateText: string): string {
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(DATE_LOCALE, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -229,9 +239,10 @@ function formatMonthYear(dateText?: string): string {
   if (!dateText) return "Unknown";
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(DATE_LOCALE, {
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -301,7 +312,7 @@ function buildGithubHeatmapMonths(weeksArray: Array<{ contributionDays?: GithubD
     daysInMonth.sort((a, b) => a.date.localeCompare(b.date));
 
     const firstDayObj = new Date(daysInMonth[0].date);
-    const monthLabel = firstDayObj.toLocaleDateString(undefined, { month: "short" });
+    const monthLabel = firstDayObj.toLocaleDateString(DATE_LOCALE, { month: "short", timeZone: "UTC" });
 
     const weeks: Array<Array<GithubDay | null>> = [];
     let currentWeek: Array<GithubDay | null> = [];
@@ -387,7 +398,7 @@ function buildHeatmapMonthsByRange(
 
     months.push({
       key: `${cursor.getFullYear()}-${cursor.getMonth()}`,
-      label: cursor.toLocaleDateString(undefined, { month: "short" }),
+      label: cursor.toLocaleDateString(DATE_LOCALE, { month: "short", timeZone: "UTC" }),
       weeks,
     });
 
@@ -437,19 +448,28 @@ function RatingChartTooltip({ active, payload, platform }: RatingTooltipProps) {
   );
 }
 
-export const CodingDashboard: React.FC = () => {
+type CodingDashboardProps = {
+  initialStats?: AggregatedStatsApi["data"] | null;
+  readOnly?: boolean;
+};
+
+export const CodingDashboard: React.FC<CodingDashboardProps> = ({
+  initialStats = null,
+  readOnly = false,
+}) => {
   const router = useRouter();
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialStats);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<AggregatedStatsApi["data"] | null>(null);
+  const [stats, setStats] = useState<AggregatedStatsApi["data"] | null>(initialStats);
   const [ratingPlatform, setRatingPlatform] = useState<string>("leetcode");
   const [topicMode, setTopicMode] = useState<"dsa" | "competitive">("dsa");
   const [heatmapPage, setHeatmapPage] = useState(0);
   const [activeView, setActiveView] = useState<"dashboard" | "github">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showProfileCard, setShowProfileCard] = useState(false);
+  const [copiedProfileUrl, setCopiedProfileUrl] = useState(false);
 
   const handleDownloadCard = async () => {
     const card = document.getElementById("profile-card");
@@ -488,7 +508,23 @@ export const CodingDashboard: React.FC = () => {
     }
   };
 
+  const handleCopyPublicUrl = async (url: string) => {
+    await navigator.clipboard.writeText(url);
+    setCopiedProfileUrl(true);
+    window.setTimeout(() => setCopiedProfileUrl(false), 1800);
+  };
+
+  const redirectToSignup = () => {
+    router.push("/signup");
+  };
+
   useEffect(() => {
+    if (initialStats) {
+      setStats(initialStats);
+      setLoading(false);
+      return;
+    }
+
     let alive = true;
 
     const loadStats = async () => {
@@ -516,7 +552,7 @@ export const CodingDashboard: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [initialStats]);
 
   const codingStats = useMemo(
     () => (stats?.coding ?? []).filter((entry) => entry.success),
@@ -525,6 +561,9 @@ export const CodingDashboard: React.FC = () => {
 
   const githubStats = stats?.github?.success ? stats.github : null;
   const totalQuestions = stats?.totalSolved ?? 0;
+  const publicProfilePath = stats?.profile?.username ? `/u/${encodeURIComponent(stats.profile.username)}` : null;
+  const publicProfileUrl =
+    publicProfilePath && typeof window !== "undefined" ? `${window.location.origin}${publicProfilePath}` : null;
 
   const profileLinks = useMemo(() => {
     const links = codingStats
@@ -756,20 +795,27 @@ export const CodingDashboard: React.FC = () => {
   }, [earliestActivityDate, heatmapRange.start]);
 
   const heatmapRangeLabel = useMemo(() => {
-    const from = heatmapRange.start.toLocaleDateString(undefined, {
+    const from = heatmapRange.start.toLocaleDateString(DATE_LOCALE, {
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "UTC",
     });
-    const to = heatmapRange.end.toLocaleDateString(undefined, {
+    const to = heatmapRange.end.toLocaleDateString(DATE_LOCALE, {
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "UTC",
     });
     return `${from} - ${to}`;
   }, [heatmapRange]);
 
   const handleLogout = async () => {
+    if (readOnly) {
+      redirectToSignup();
+      return;
+    }
+
     await supabase.auth.signOut();
     router.push("/signin");
   };
@@ -864,7 +910,11 @@ export const CodingDashboard: React.FC = () => {
                 <button
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-600 dark:text-zinc-400 transition hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
                   onClick={() => {
-                    router.push("/dashboard/links");
+                    if (readOnly) {
+                      redirectToSignup();
+                    } else {
+                      router.push("/dashboard/links");
+                    }
                     setIsSidebarOpen(false);
                   }}
                 >
@@ -874,7 +924,11 @@ export const CodingDashboard: React.FC = () => {
                 <button
                   className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-600 dark:text-zinc-400 transition hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
                   onClick={() => {
-                    router.push("/");
+                    if (readOnly) {
+                      redirectToSignup();
+                    } else {
+                      router.push("/");
+                    }
                     setIsSidebarOpen(false);
                   }}
                 >
@@ -910,7 +964,7 @@ export const CodingDashboard: React.FC = () => {
                 onClick={handleLogout}
               >
                 <LogOut className="h-4 w-4" />
-                Logout
+                {readOnly ? "Create Profile" : "Logout"}
               </Button>
             </div>
           </aside>
@@ -932,10 +986,20 @@ export const CodingDashboard: React.FC = () => {
                   </h1>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {publicProfilePath && !readOnly ? (
+                    <Button
+                      variant="outline"
+                      className="gap-2 rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      onClick={() => window.open(publicProfilePath, "_blank", "noopener,noreferrer")}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Public Profile
+                    </Button>
+                  ) : null}
                   <Button
                     variant="outline"
                     className="gap-2 rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                    onClick={() => setShowProfileCard(true)}
+                    onClick={readOnly ? redirectToSignup : () => setShowProfileCard(true)}
                   >
                     <Share2 className="h-4 w-4" />
                     Share
@@ -960,7 +1024,7 @@ export const CodingDashboard: React.FC = () => {
                     <CardFooter>
                       <Button
                         className="gap-2 rounded-xl bg-black text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                        onClick={() => router.push("/dashboard/links")}
+                        onClick={readOnly ? redirectToSignup : () => router.push("/dashboard/links")}
                       >
                         <UserRoundCog className="h-4 w-4" />
                         Manage Links
@@ -1777,6 +1841,29 @@ export const CodingDashboard: React.FC = () => {
                 )}
               </div>
             </div>
+
+            {publicProfileUrl ? (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/10 p-3 text-sm">
+                <p className="mb-2 text-center text-zinc-400">Public URL</p>
+                <div className="flex items-center gap-2 rounded-lg bg-black/30 p-2">
+                  <p className="min-w-0 flex-1 truncate text-xs text-zinc-200">{publicProfileUrl}</p>
+                  <button
+                    className="rounded-md bg-white/10 p-2 transition hover:bg-white/20"
+                    onClick={() => handleCopyPublicUrl(publicProfileUrl)}
+                    aria-label="Copy public profile URL"
+                  >
+                    {copiedProfileUrl ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                  <button
+                    className="rounded-md bg-white/10 p-2 transition hover:bg-white/20"
+                    onClick={() => window.open(publicProfileUrl, "_blank", "noopener,noreferrer")}
+                    aria-label="Open public profile"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <div className="mt-6 flex justify-between">
               <Button

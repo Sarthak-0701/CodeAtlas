@@ -49,8 +49,10 @@ export async function POST(request: Request) {
 
         // 💡 Clear cache instantly because user data inputs are now different
         try {
-            const cacheKey = `user:stats:${user.id}`;
-            await redis.del(cacheKey);
+            await Promise.all([
+                redis.del(`user:stats:${user.id}`),
+                redis.del(`public:stats:${user.id}`),
+            ]);
         } catch (cacheErr) {
             console.error("Redis Invalidation Error:", cacheErr);
         }
