@@ -27,6 +27,25 @@ function parseFirstNumber(text: string): number | null {
     return totalSolvedMatch ? parseInt(totalSolvedMatch[0], 10) : null;
 }
 
+type CodeChefContestHistoryEntry = {
+    contestName?: string;
+    rating: number;
+    date?: string;
+    rank?: number | null;
+};
+
+type CodeChefRatingPayload = {
+    code?: string;
+    name?: string;
+    reason?: string;
+    rating?: number | string;
+    rank?: number | string;
+    end_date?: string;
+    getyear?: number | string;
+    getmonth?: number | string;
+    getday?: number | string;
+};
+
 function parseCodeChefSolvedCount($: cheerio.CheerioAPI): number {
     const solvedSelectors = [
         '.rating-data-section.problems-solved',
@@ -52,6 +71,87 @@ function parseCodeChefSolvedCount($: cheerio.CheerioAPI): number {
     }
 
     return 0;
+}
+
+function extractJavaScriptArray(html: string, variableName: string): string | null {
+    const variableMatch = new RegExp(`(?:var\\s+|let\\s+|const\\s+)?${variableName}\\s*=\\s*\\[`).exec(html);
+    if (!variableMatch) return null;
+
+    const startIndex = variableMatch.index + variableMatch[0].lastIndexOf("[");
+    let depth = 0;
+    let inString: string | null = null;
+    let escaped = false;
+
+    for (let index = startIndex; index < html.length; index += 1) {
+        const char = html[index];
+
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (char === "\\") {
+                escaped = true;
+            } else if (char === inString) {
+                inString = null;
+            }
+            continue;
+        }
+
+        if (char === '"' || char === "'") {
+            inString = char;
+            continue;
+        }
+
+        if (char === "[") depth += 1;
+        if (char === "]") depth -= 1;
+
+        if (depth === 0) {
+            return html.slice(startIndex, index + 1);
+        }
+    }
+
+    return null;
+}
+
+function parseCodeChefContestDate(entry: CodeChefRatingPayload): string | undefined {
+    if (entry.end_date) {
+        const date = new Date(entry.end_date);
+        if (!Number.isNaN(date.getTime())) return date.toISOString();
+    }
+
+    if (entry.getyear && entry.getmonth && entry.getday) {
+        const date = new Date(`${entry.getday} ${entry.getmonth} ${entry.getyear}`);
+        if (!Number.isNaN(date.getTime())) return date.toISOString();
+    }
+
+    return undefined;
+}
+
+function parseCodeChefContestHistory(html: string): CodeChefContestHistoryEntry[] {
+    const rawRatingArray = extractJavaScriptArray(html, "all_rating");
+    if (!rawRatingArray) return [];
+
+    try {
+        const parsed = JSON.parse(rawRatingArray) as CodeChefRatingPayload[];
+
+        return parsed.reduce<CodeChefContestHistoryEntry[]>((history, entry) => {
+                const rating = Number(entry.rating);
+                if (!Number.isFinite(rating) || rating <= 0) return history;
+
+                const rank = entry.rank === undefined || entry.rank === "" ? null : Number(entry.rank);
+
+                history.push({
+                    contestName: entry.name || entry.reason || entry.code || "Contest",
+                    rating: Math.round(rating),
+                    rank: Number.isFinite(rank) ? rank : null,
+                    date: parseCodeChefContestDate(entry),
+                });
+
+                return history;
+            }, []);
+    } catch (error) {
+        console.error("Failed to parse CodeChef contest history:", error);
+        return [];
+    }
 }
 
 export async function fetchCodeChefUserInfo(handle: string) {
@@ -94,6 +194,8 @@ export async function fetchCodeChefUserInfo(handle: string) {
         // Extracting profile image avatar
         const avatar = $('.user-details-container header img').attr('src');
 
+        const contestHistory = parseCodeChefContestHistory(html);
+
         return {
             success: true,
             platform: "codechef",
@@ -103,7 +205,7 @@ export async function fetchCodeChefUserInfo(handle: string) {
             totalSolved: totalSolved,
             stars: stars,
             avatar: avatar || null,
-            contestHistory: [],
+            contestHistory,
             activity: [],
         };
     } catch (error) {

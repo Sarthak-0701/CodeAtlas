@@ -3,14 +3,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  LineChart,
+  Area,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  Legend,
+  ComposedChart,
 } from "recharts";
 import {
   BarChart3,
@@ -28,6 +26,7 @@ import {
   Search,
   Share2,
   TrendingUp,
+  TrendingDown,
   UserRoundCog,
   X,
   Code,
@@ -49,6 +48,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { ChartConfig, ChartContainer, ChartTooltip } from "@/components/ui/charts";
 import * as htmlToImage from "html-to-image";
 
 type ActivityPoint = {
@@ -144,6 +144,8 @@ type AggregatedStatsApi = {
 type RatingSeries = {
   label: string;
   rating: number;
+  contestName?: string;
+  date?: string;
 };
 
 type DsaInsight = {
@@ -268,7 +270,7 @@ type GithubHeatmapMonth = {
   weeks: Array<Array<GithubDay | null>>;
 };
 
-function buildGithubHeatmapMonths(weeksArray: any[]): GithubHeatmapMonth[] {
+function buildGithubHeatmapMonths(weeksArray: Array<{ contributionDays?: GithubDay[] }>): GithubHeatmapMonth[] {
   if (!weeksArray || weeksArray.length === 0) return [];
 
   const allDays: GithubDay[] = [];
@@ -408,6 +410,31 @@ function getGithubHeatColorLevel(contributions: number): string {
   if (contributions <= 5) return "bg-emerald-400 dark:bg-emerald-800";
   if (contributions <= 10) return "bg-emerald-600 dark:bg-emerald-600";
   return "bg-emerald-700 dark:bg-emerald-500";
+}
+
+type RatingTooltipProps = {
+  active?: boolean;
+  payload?: Array<{
+    value: number;
+    payload: RatingSeries;
+  }>;
+  platform: string;
+};
+
+function RatingChartTooltip({ active, payload, platform }: RatingTooltipProps) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0].payload;
+
+  return (
+    <div className="rounded-lg bg-zinc-950 px-3 py-2 text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-950">
+      <div className="max-w-[14rem] truncate text-xs font-medium text-zinc-300 dark:text-zinc-600">
+        {point.contestName ?? formatPlatformName(platform)}
+      </div>
+      <div className="mt-1 text-sm font-semibold tabular-nums">{point.rating.toLocaleString()}</div>
+      {point.date ? <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500">{formatDatePretty(point.date)}</div> : null}
+    </div>
+  );
 }
 
 export const CodingDashboard: React.FC = () => {
@@ -565,9 +592,12 @@ export const CodingDashboard: React.FC = () => {
         const history = platform.contestHistory ?? [];
         for (const point of history) {
           if (typeof point.rating === "number") {
+            const label = point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest";
             rows.push({
-              label: point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest",
+              label,
               rating: point.rating,
+              contestName: point.contestName,
+              date: point.date,
             });
           }
         }
@@ -579,9 +609,25 @@ export const CodingDashboard: React.FC = () => {
             const dateText = point.ratingUpdateTimeSeconds
               ? new Date(point.ratingUpdateTimeSeconds * 1000).toISOString()
               : undefined;
+            const label = dateText ? formatDatePretty(dateText) : point.contestName ?? "Contest";
             rows.push({
-              label: dateText ? formatDatePretty(dateText) : point.contestName ?? "Contest",
+              label,
               rating: ratingValue,
+              contestName: point.contestName,
+              date: dateText,
+            });
+          }
+        }
+      } else if (key === "codechef") {
+        const history = platform.contestHistory ?? [];
+        for (const point of history) {
+          if (typeof point.rating === "number") {
+            const label = point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest";
+            rows.push({
+              label,
+              rating: point.rating,
+              contestName: point.contestName,
+              date: point.date,
             });
           }
         }
@@ -613,6 +659,33 @@ export const CodingDashboard: React.FC = () => {
       setRatingPlatform(firstPlatform);
     }
   }, [ratingByPlatform, ratingPlatform]);
+
+  const selectedRatingData = useMemo(
+    () => ratingByPlatform.get(ratingPlatform) ?? [],
+    [ratingByPlatform, ratingPlatform],
+  );
+
+  const ratingSummary = useMemo(() => {
+    const latest = selectedRatingData[selectedRatingData.length - 1] ?? null;
+    const previous = selectedRatingData[selectedRatingData.length - 2] ?? null;
+    const maxRating = selectedRatingData.length
+      ? Math.max(...selectedRatingData.map((point) => point.rating))
+      : null;
+    const delta = latest && previous ? latest.rating - previous.rating : 0;
+    const firstDate = selectedRatingData[0]?.date;
+    const lastDate = latest?.date;
+
+    return {
+      latest,
+      previous,
+      maxRating,
+      delta,
+      range:
+        firstDate && lastDate
+          ? `${formatMonthYear(firstDate)} - ${formatMonthYear(lastDate)}`
+          : `${selectedRatingData.length} contest${selectedRatingData.length === 1 ? "" : "s"}`,
+    };
+  }, [selectedRatingData]);
 
   const dsaInsights = useMemo<DsaInsight[]>(() => {
     const rows: DsaInsight[] = [];
@@ -1219,60 +1292,173 @@ export const CodingDashboard: React.FC = () => {
                 </section>
 
                 <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm xl:col-span-8">
-                    <CardHeader className="space-y-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <CardTitle className="flex items-center gap-2 text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                          <BarChart3 className="h-5 w-5 text-zinc-700 dark:text-zinc-300" />
+                  <Card className="overflow-hidden rounded-2xl border-zinc-200 bg-white/80 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/60 xl:col-span-8">
+                    <CardHeader className="flex-row items-start justify-between space-y-0 border-0 pb-4">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                          <BarChart3 className="h-5 w-5 text-violet-500" />
                           Platform Rating Trend
                         </CardTitle>
-                        <div className="flex flex-wrap gap-2">
-                          {[...ratingByPlatform.keys()].map((key) => (
-                            <Button
-                              key={key}
-                              size="sm"
-                              variant={ratingPlatform === key ? "default" : "outline"}
-                              className={
-                                ratingPlatform === key
-                                  ? "rounded-xl bg-black text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                                  : "rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                              }
-                              onClick={() => setRatingPlatform(key)}
-                            >
-                              {formatPlatformName(key)}
-                            </Button>
-                          ))}
-                        </div>
+                        <CardDescription className="mt-2 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          {ratingByPlatform.size === 0 ? "No contest history" : ratingSummary.range}
+                        </CardDescription>
                       </div>
-                      <CardDescription className="text-sm text-zinc-500 dark:text-zinc-400">
-                        Compare rating movement across platforms with available contest history.
-                      </CardDescription>
+                      <div className="flex max-w-full flex-wrap justify-end gap-2">
+                        {[...ratingByPlatform.keys()].map((key) => (
+                          <Button
+                            key={key}
+                            size="sm"
+                            variant={ratingPlatform === key ? "default" : "outline"}
+                            className={
+                              ratingPlatform === key
+                                ? "rounded-lg bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
+                                : "rounded-lg border-zinc-300 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            }
+                            onClick={() => setRatingPlatform(key)}
+                          >
+                            {formatPlatformName(key)}
+                          </Button>
+                        ))}
+                      </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="px-0">
                       {ratingByPlatform.size === 0 ? (
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                        <p className="px-6 pb-6 text-sm text-zinc-500 dark:text-zinc-400">
                           No rating history available yet. Add handles and participate in rated contests.
                         </p>
                       ) : (
-                        <div className="h-[340px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={ratingByPlatform.get(ratingPlatform) ?? []}>
-                              <CartesianGrid stroke="#d4d4d8" strokeDasharray="3 3" />
-                              <XAxis dataKey="label" minTickGap={20} stroke="#71717a" />
-                              <YAxis stroke="#71717a" />
-                              <RechartsTooltip />
-                              <Legend />
-                              <Line
-                                type="monotone"
-                                dataKey="rating"
-                                name={`${formatPlatformName(ratingPlatform)} Rating`}
-                                stroke="#1d4ed8"
-                                strokeWidth={2.5}
-                                dot={false}
-                              />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
+                        <>
+                          <div className="px-6 pb-6">
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div className="text-3xl font-bold tracking-tight text-zinc-950 dark:text-zinc-50">
+                                {ratingSummary.latest?.rating.toLocaleString() ?? "N/A"}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  ratingSummary.delta >= 0
+                                    ? "mb-1 gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400"
+                                    : "mb-1 gap-1 border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-400"
+                                }
+                              >
+                                {ratingSummary.delta >= 0 ? (
+                                  <TrendingUp className="h-3 w-3" />
+                                ) : (
+                                  <TrendingDown className="h-3 w-3" />
+                                )}
+                                {ratingSummary.delta >= 0 ? "+" : ""}
+                                {ratingSummary.delta.toLocaleString()}
+                              </Badge>
+                              <div className="mb-1 text-sm text-zinc-500 dark:text-zinc-400">
+                                Max {ratingSummary.maxRating?.toLocaleString() ?? "N/A"}
+                              </div>
+                            </div>
+                            <p className="mt-2 max-w-xl truncate text-sm text-zinc-500 dark:text-zinc-400">
+                              Latest contest: {ratingSummary.latest?.contestName ?? ratingSummary.latest?.label ?? "Current rating"}
+                            </p>
+                          </div>
+
+                          <div className="relative">
+                            <ChartContainer
+                              config={ratingChartConfig}
+                              className="h-[320px] w-full overflow-visible ps-2 pe-6 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-violet-500"
+                            >
+                              <ComposedChart
+                                data={selectedRatingData}
+                                margin={{
+                                  top: 24,
+                                  right: 20,
+                                  left: 0,
+                                  bottom: 24,
+                                }}
+                                style={{ overflow: "visible" }}
+                              >
+                                <defs>
+                                  <linearGradient id="ratingGradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={ratingChartConfig.rating.color} stopOpacity={0.18} />
+                                    <stop offset="100%" stopColor={ratingChartConfig.rating.color} stopOpacity={0} />
+                                  </linearGradient>
+                                  <filter id="ratingDotShadow" x="-50%" y="-50%" width="200%" height="200%">
+                                    <feDropShadow dx="2" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.35)" />
+                                  </filter>
+                                </defs>
+
+                                <CartesianGrid
+                                  strokeDasharray="4 12"
+                                  stroke="var(--input)"
+                                  strokeOpacity={1}
+                                  horizontal={true}
+                                  vertical={false}
+                                />
+                                <XAxis
+                                  dataKey="label"
+                                  axisLine={false}
+                                  tickLine={false}
+                                  tick={{ fontSize: 12 }}
+                                  tickMargin={12}
+                                  minTickGap={24}
+                                  dy={10}
+                                />
+                                <YAxis
+                                  axisLine={false}
+                                  tickLine={false}
+                                  tick={{ fontSize: 12 }}
+                                  tickFormatter={(value) => `${Number(value)}`}
+                                  domain={["dataMin - 100", "dataMax + 100"]}
+                                  tickCount={6}
+                                  tickMargin={12}
+                                />
+                                <ChartTooltip
+                                  content={<RatingChartTooltip platform={ratingPlatform} />}
+                                  cursor={{
+                                    stroke: ratingChartConfig.rating.color,
+                                    strokeWidth: 1,
+                                  }}
+                                />
+                                <Area
+                                  type="linear"
+                                  dataKey="rating"
+                                  stroke="transparent"
+                                  fill="url(#ratingGradient)"
+                                  strokeWidth={0}
+                                  dot={false}
+                                />
+                                <Line
+                                  type="linear"
+                                  dataKey="rating"
+                                  name={`${formatPlatformName(ratingPlatform)} Rating`}
+                                  stroke={ratingChartConfig.rating.color}
+                                  strokeWidth={3}
+                                  dot={(props) => {
+                                    const { cx, cy, index } = props;
+                                    const isLatestPoint = index === selectedRatingData.length - 1;
+                                    if (!isLatestPoint) return <g key={`dot-${cx}-${cy}`} />;
+
+                                    return (
+                                      <circle
+                                        key={`dot-${cx}-${cy}`}
+                                        cx={cx}
+                                        cy={cy}
+                                        r={5.5}
+                                        fill={ratingChartConfig.rating.color}
+                                        stroke="white"
+                                        strokeWidth={2}
+                                        filter="url(#ratingDotShadow)"
+                                      />
+                                    );
+                                  }}
+                                  activeDot={{
+                                    r: 6,
+                                    fill: ratingChartConfig.rating.color,
+                                    stroke: "white",
+                                    strokeWidth: 2,
+                                    filter: "url(#ratingDotShadow)",
+                                  }}
+                                />
+                              </ComposedChart>
+                            </ChartContainer>
+                          </div>
+                        </>
                       )}
                     </CardContent>
                   </Card>
@@ -1614,3 +1800,10 @@ export const CodingDashboard: React.FC = () => {
     </TooltipProvider>
   );
 };
+
+const ratingChartConfig = {
+  rating: {
+    label: "Rating",
+    color: "var(--color-violet-500)",
+  },
+} satisfies ChartConfig;
