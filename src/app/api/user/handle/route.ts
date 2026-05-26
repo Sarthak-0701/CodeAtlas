@@ -1,6 +1,7 @@
 import { createClient } from "@/app/lib/supabase/server";
 import { NextResponse } from "next/server";
 import { redis } from "@/app/lib/redis";
+import { ensureUserProfile } from "@/app/lib/user-profile";
 
 export async function POST(request: Request) {
     try {
@@ -15,6 +16,14 @@ export async function POST(request: Request) {
                 success: false,
                 message: "Unauthorized. Please log in"
             }, { status: 401 });
+        }
+
+        const profile = await ensureUserProfile(user);
+        if (!profile) {
+            return NextResponse.json({
+                success: false,
+                message: "Could not prepare your profile. Please try logging in again."
+            }, { status: 500 });
         }
 
         // Parse the request body
