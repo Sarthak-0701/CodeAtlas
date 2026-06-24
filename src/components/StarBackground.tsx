@@ -6,9 +6,8 @@ export default function StarBackground() {
     const [stars, setStars] = useState<{ id: number; left: string; top: string; delay: string; duration: string; size: string }[]>([]);
 
     useEffect(() => {
-        // 1. Increased density to 200 stars
         const generateStars = () => {
-            const newStars = Array.from({ length: 1000 }).map((_, i) => ({
+            const newStars = Array.from({ length: 500 }).map((_, i) => ({
                 id: i,
                 left: `${Math.random() * 100}%`,
                 top: `${Math.random() * 100}%`,

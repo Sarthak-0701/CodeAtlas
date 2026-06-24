@@ -1,16 +1,10 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/app/lib/supabase/server';
+import { redis } from '@/app/lib/redis';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const RATE_LIMIT_WINDOW_SECONDS = 15 * 60; // 15 minutes in seconds (Upstash uses seconds for EX expiration)
 const RATE_LIMIT_MAX_REQUESTS = 5;
-
-type RateLimitBucket = {
-    count: number;
-    resetAt: number;
-};
-
-const resetRequestBuckets = new Map<string, RateLimitBucket>();
 
 function normalizeEmail(email: unknown) {
     return typeof email === 'string' ? email.trim().toLowerCase() : '';
@@ -29,20 +23,25 @@ function getClientIp(request: Request) {
     return forwardedFor?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || 'unknown';
 }
 
-function isRateLimited(key: string) {
-    const now = Date.now();
-    const existing = resetRequestBuckets.get(key);
+async function isRateLimited(key: string): Promise<boolean> {
+    const redisKey = `ratelimit:forgot-password:${key}`;
 
-    if (!existing || existing.resetAt <= now) {
-        resetRequestBuckets.set(key, {
-            count: 1,
-            resetAt: now + RATE_LIMIT_WINDOW_MS,
-        });
+    try {
+        // 1. Atomically increment the request count
+        const currentCount = await redis.incr(redisKey);
+
+        // 2. If it's the very first request in this window, establish the 15-minute TTL
+        if (currentCount === 1) {
+            await redis.expire(redisKey, RATE_LIMIT_WINDOW_SECONDS);
+        }
+
+        // 3. Enforce the max requests constraint
+        return currentCount > RATE_LIMIT_MAX_REQUESTS;
+    } catch (error) {
+        // Fail-open strategy: Log Upstash errors but don't brick the login flow for users
+        console.error('Redis rate limiting failed:', error);
         return false;
     }
-
-    existing.count += 1;
-    return existing.count > RATE_LIMIT_MAX_REQUESTS;
 }
 
 function getAppOrigin(request: Request) {
@@ -87,7 +86,7 @@ export async function POST(request: Request) {
     }
 
     const rateLimitKey = `${getClientIp(request)}:${email}`;
-    if (isRateLimited(rateLimitKey)) {
+    if (await isRateLimited(rateLimitKey)) {
         return NextResponse.json(
             { success: false, message: 'Too many reset attempts. Please try again later.' },
             { status: 429 }

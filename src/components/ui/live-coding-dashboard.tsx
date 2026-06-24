@@ -4,23 +4,22 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import StarBackground from "@/components/StarBackground";
 import {
-  LineChart,
+  Area,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip as RechartsTooltip,
-  ResponsiveContainer,
-  Legend,
+  ComposedChart,
 } from "recharts";
 import {
   BarChart3,
   Bell,
   BookOpenText,
   CalendarDays,
+  Check,
   Clock3,
+  Copy,
   FolderGit2,
   GitCompareArrows,
   Home,
@@ -31,6 +30,7 @@ import {
   Search,
   Share2,
   TrendingUp,
+  TrendingDown,
   UserRoundCog,
   X,
   Code,
@@ -52,6 +52,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
+import { ChartConfig, ChartContainer, ChartTooltip } from "@/components/ui/charts";
 import * as htmlToImage from "html-to-image";
 
 type ActivityPoint = {
@@ -78,7 +79,7 @@ type CodingPlatformStats = {
   rating?: number;
   maxRating?: number;
   contestRating?: number;
-  rank?: string | number;
+  rank?: string | number | null;
   stars?: string;
   score?: number;
   monthlyScore?: number;
@@ -141,12 +142,19 @@ type AggregatedStatsApi = {
     coding: CodingPlatformStats[];
     github: GitHubStats | null;
     totalSolved: number;
+    profile?: {
+      id: string;
+      username: string;
+      email?: string | null;
+    } | null;
   };
 };
 
 type RatingSeries = {
   label: string;
   rating: number;
+  contestName?: string;
+  date?: string;
 };
 
 type DsaInsight = {
@@ -174,6 +182,8 @@ const platformLabels: Record<string, string> = {
   gfg: "GFG",
   interviewbit: "InterviewBit",
 };
+
+const DATE_LOCALE = "en-US";
 
 function formatPlatformName(platform: string): string {
   return platformLabels[platform] ?? platform.charAt(0).toUpperCase() + platform.slice(1);
@@ -206,10 +216,11 @@ function getPlatformProfileUrl(platform: string, handle?: string): string | null
 function formatDatePretty(dateText: string): string {
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(DATE_LOCALE, {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -230,9 +241,10 @@ function formatMonthYear(dateText?: string): string {
   if (!dateText) return "Unknown";
   const date = new Date(dateText);
   if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(DATE_LOCALE, {
     month: "short",
     year: "numeric",
+    timeZone: "UTC",
   });
 }
 
@@ -271,7 +283,7 @@ type GithubHeatmapMonth = {
   weeks: Array<Array<GithubDay | null>>;
 };
 
-function buildGithubHeatmapMonths(weeksArray: any[]): GithubHeatmapMonth[] {
+function buildGithubHeatmapMonths(weeksArray: Array<{ contributionDays?: GithubDay[] }>): GithubHeatmapMonth[] {
   if (!weeksArray || weeksArray.length === 0) return [];
 
   const allDays: GithubDay[] = [];
@@ -302,8 +314,8 @@ function buildGithubHeatmapMonths(weeksArray: any[]): GithubHeatmapMonth[] {
     daysInMonth.sort((a, b) => a.date.localeCompare(b.date));
 
     const firstDayObj = new Date(daysInMonth[0].date);
-    const monthLabel = firstDayObj.toLocaleDateString(undefined, { month: "short" });
-    
+    const monthLabel = firstDayObj.toLocaleDateString(DATE_LOCALE, { month: "short", timeZone: "UTC" });
+
     const weeks: Array<Array<GithubDay | null>> = [];
     let currentWeek: Array<GithubDay | null> = [];
 
@@ -388,7 +400,7 @@ function buildHeatmapMonthsByRange(
 
     months.push({
       key: `${cursor.getFullYear()}-${cursor.getMonth()}`,
-      label: cursor.toLocaleDateString(undefined, { month: "short" }),
+      label: cursor.toLocaleDateString(DATE_LOCALE, { month: "short", timeZone: "UTC" }),
       weeks,
     });
 
@@ -413,19 +425,53 @@ function getGithubHeatColorLevel(contributions: number): string {
   return "bg-blue-600 dark:bg-blue-500 text-white";
 }
 
-export const CodingDashboard: React.FC = () => {
+type RatingTooltipProps = {
+  active?: boolean;
+  payload?: Array<{
+    value: number;
+    payload: RatingSeries;
+  }>;
+  platform: string;
+};
+
+function RatingChartTooltip({ active, payload, platform }: RatingTooltipProps) {
+  if (!active || !payload?.length) return null;
+
+  const point = payload[0].payload;
+
+  return (
+    <div className="rounded-lg bg-zinc-950 px-3 py-2 text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-950">
+      <div className="max-w-[14rem] truncate text-xs font-medium text-zinc-300 dark:text-zinc-600">
+        {point.contestName ?? formatPlatformName(platform)}
+      </div>
+      <div className="mt-1 text-sm font-semibold tabular-nums">{point.rating.toLocaleString()}</div>
+      {point.date ? <div className="mt-0.5 text-[11px] text-zinc-400 dark:text-zinc-500">{formatDatePretty(point.date)}</div> : null}
+    </div>
+  );
+}
+
+type CodingDashboardProps = {
+  initialStats?: AggregatedStatsApi["data"] | null;
+  readOnly?: boolean;
+};
+
+export const CodingDashboard: React.FC<CodingDashboardProps> = ({
+  initialStats = null,
+  readOnly = false,
+}) => {
   const router = useRouter();
   const supabase = createClient();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialStats);
   const [error, setError] = useState<string | null>(null);
-  const [stats, setStats] = useState<AggregatedStatsApi["data"] | null>(null);
+  const [stats, setStats] = useState<AggregatedStatsApi["data"] | null>(initialStats);
   const [ratingPlatform, setRatingPlatform] = useState<string>("leetcode");
   const [topicMode, setTopicMode] = useState<"dsa" | "competitive">("dsa");
   const [heatmapPage, setHeatmapPage] = useState(0);
   const [activeView, setActiveView] = useState<"dashboard" | "github">("dashboard");
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [showProfileCard, setShowProfileCard] = useState(false);
+  const [copiedProfileUrl, setCopiedProfileUrl] = useState(false);
 
   const handleDownloadCard = async () => {
     const card = document.getElementById("profile-card");
@@ -464,7 +510,23 @@ export const CodingDashboard: React.FC = () => {
     }
   };
 
+  const handleCopyPublicUrl = async (url: string) => {
+    await navigator.clipboard.writeText(url);
+    setCopiedProfileUrl(true);
+    window.setTimeout(() => setCopiedProfileUrl(false), 1800);
+  };
+
+  const redirectToSignup = () => {
+    router.push("/signup");
+  };
+
   useEffect(() => {
+    if (initialStats) {
+      setStats(initialStats);
+      setLoading(false);
+      return;
+    }
+
     let alive = true;
 
     const loadStats = async () => {
@@ -492,7 +554,7 @@ export const CodingDashboard: React.FC = () => {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [initialStats]);
 
   const codingStats = useMemo(
     () => (stats?.coding ?? []).filter((entry) => entry.success),
@@ -501,6 +563,9 @@ export const CodingDashboard: React.FC = () => {
 
   const githubStats = stats?.github?.success ? stats.github : null;
   const totalQuestions = stats?.totalSolved ?? 0;
+  const publicProfilePath = stats?.profile?.username ? `/u/${encodeURIComponent(stats.profile.username)}` : null;
+  const publicProfileUrl =
+    publicProfilePath && typeof window !== "undefined" ? `${window.location.origin}${publicProfilePath}` : null;
 
   const profileLinks = useMemo(() => {
     const links = codingStats
@@ -568,9 +633,12 @@ export const CodingDashboard: React.FC = () => {
         const history = platform.contestHistory ?? [];
         for (const point of history) {
           if (typeof point.rating === "number") {
+            const label = point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest";
             rows.push({
-              label: point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest",
+              label,
               rating: point.rating,
+              contestName: point.contestName,
+              date: point.date,
             });
           }
         }
@@ -582,9 +650,25 @@ export const CodingDashboard: React.FC = () => {
             const dateText = point.ratingUpdateTimeSeconds
               ? new Date(point.ratingUpdateTimeSeconds * 1000).toISOString()
               : undefined;
+            const label = dateText ? formatDatePretty(dateText) : point.contestName ?? "Contest";
             rows.push({
-              label: dateText ? formatDatePretty(dateText) : point.contestName ?? "Contest",
+              label,
               rating: ratingValue,
+              contestName: point.contestName,
+              date: dateText,
+            });
+          }
+        }
+      } else if (key === "codechef") {
+        const history = platform.contestHistory ?? [];
+        for (const point of history) {
+          if (typeof point.rating === "number") {
+            const label = point.date ? formatDatePretty(point.date) : point.contestName ?? "Contest";
+            rows.push({
+              label,
+              rating: point.rating,
+              contestName: point.contestName,
+              date: point.date,
             });
           }
         }
@@ -616,6 +700,33 @@ export const CodingDashboard: React.FC = () => {
       setRatingPlatform(firstPlatform);
     }
   }, [ratingByPlatform, ratingPlatform]);
+
+  const selectedRatingData = useMemo(
+    () => ratingByPlatform.get(ratingPlatform) ?? [],
+    [ratingByPlatform, ratingPlatform],
+  );
+
+  const ratingSummary = useMemo(() => {
+    const latest = selectedRatingData[selectedRatingData.length - 1] ?? null;
+    const previous = selectedRatingData[selectedRatingData.length - 2] ?? null;
+    const maxRating = selectedRatingData.length
+      ? Math.max(...selectedRatingData.map((point) => point.rating))
+      : null;
+    const delta = latest && previous ? latest.rating - previous.rating : 0;
+    const firstDate = selectedRatingData[0]?.date;
+    const lastDate = latest?.date;
+
+    return {
+      latest,
+      previous,
+      maxRating,
+      delta,
+      range:
+        firstDate && lastDate
+          ? `${formatMonthYear(firstDate)} - ${formatMonthYear(lastDate)}`
+          : `${selectedRatingData.length} contest${selectedRatingData.length === 1 ? "" : "s"}`,
+    };
+  }, [selectedRatingData]);
 
   const dsaInsights = useMemo<DsaInsight[]>(() => {
     const rows: DsaInsight[] = [];
@@ -686,20 +797,27 @@ export const CodingDashboard: React.FC = () => {
   }, [earliestActivityDate, heatmapRange.start]);
 
   const heatmapRangeLabel = useMemo(() => {
-    const from = heatmapRange.start.toLocaleDateString(undefined, {
+    const from = heatmapRange.start.toLocaleDateString(DATE_LOCALE, {
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "UTC",
     });
-    const to = heatmapRange.end.toLocaleDateString(undefined, {
+    const to = heatmapRange.end.toLocaleDateString(DATE_LOCALE, {
       month: "short",
       day: "numeric",
       year: "numeric",
+      timeZone: "UTC",
     });
     return `${from} - ${to}`;
   }, [heatmapRange]);
 
   const handleLogout = async () => {
+    if (readOnly) {
+      redirectToSignup();
+      return;
+    }
+
     await supabase.auth.signOut();
     router.push("/signin");
   };
@@ -744,6 +862,7 @@ export const CodingDashboard: React.FC = () => {
 
   return (
     <TooltipProvider>
+<<<<<<< HEAD
       <div className="relative min-h-screen w-full bg-zinc-950 text-zinc-50 antialiased font-sans selection:bg-emerald-500/30 selection:text-emerald-200">
         <StarBackground />
         
@@ -751,6 +870,11 @@ export const CodingDashboard: React.FC = () => {
         <div className="pointer-events-none absolute top-0 left-0 right-0 h-[500px] overflow-hidden">
           <div className="absolute top-[-250px] left-[20%] w-[600px] h-[600px] rounded-full bg-emerald-500/10 blur-[140px]" />
           <div className="absolute top-[-200px] right-[10%] w-[500px] h-[500px] rounded-full bg-blue-500/10 blur-[120px]" />
+=======
+      <div className="relative min-h-screen w-full overflow-x-hidden bg-zinc-50 dark:bg-black p-4 md:p-8 font-sans selection:bg-zinc-300 dark:selection:bg-zinc-700">
+        <div className="pointer-events-none absolute top-0 inset-x-0 h-[420px] opacity-40 dark:opacity-20">
+          <div className="absolute -top-[100px] -left-[10%] w-[120%] h-full bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-300 via-transparent to-transparent dark:from-zinc-800" />
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
         </div>
 
         <div className="relative z-10 mx-auto flex min-h-screen w-full max-w-[1600px] xl:p-4 gap-4">
@@ -791,9 +915,46 @@ export const CodingDashboard: React.FC = () => {
                   Performance Metrics
                 </button>
                 <button
+<<<<<<< HEAD
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-sm transition font-medium ${activeView === "github"
                     ? "bg-zinc-900 text-white border border-zinc-800 shadow-inner"
                     : "text-zinc-400 hover:bg-zinc-900/40 hover:text-zinc-200"
+=======
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-600 dark:text-zinc-400 transition hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  onClick={() => {
+                    if (readOnly) {
+                      redirectToSignup();
+                    } else {
+                      router.push("/dashboard/links");
+                    }
+                    setIsSidebarOpen(false);
+                  }}
+                >
+                  <UserRoundCog className="h-4 w-4" />
+                  Manage Links
+                </button>
+                <button
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-zinc-600 dark:text-zinc-400 transition hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+                  onClick={() => {
+                    if (readOnly) {
+                      redirectToSignup();
+                    } else {
+                      router.push("/");
+                    }
+                    setIsSidebarOpen(false);
+                  }}
+                >
+                  <Home className="h-4 w-4" />
+                  Back To Home
+                </button>
+              </div>
+              <Separator className="bg-zinc-200 dark:bg-zinc-800" />
+              <div className="space-y-2">
+                <button
+                  className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${activeView === "github"
+                    ? "border border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/70 font-semibold text-zinc-900 dark:text-zinc-100"
+                    : "text-zinc-600 dark:text-zinc-400 hover:bg-white/70 dark:hover:bg-zinc-900/60 hover:text-zinc-900 dark:hover:text-zinc-100"
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                     }`}
                   onClick={() => {
                     setActiveView("github");
@@ -835,8 +996,13 @@ export const CodingDashboard: React.FC = () => {
                 className="w-full justify-start gap-3 rounded-xl bg-zinc-900 hover:bg-rose-950/30 border border-zinc-800 hover:border-rose-900/50 text-zinc-300 hover:text-rose-400 py-6 transition group"
                 onClick={handleLogout}
               >
+<<<<<<< HEAD
                 <LogOut className="h-4 w-4 text-zinc-500 group-hover:text-rose-400 transition" />
                 Disconnect Session
+=======
+                <LogOut className="h-4 w-4" />
+                {readOnly ? "Create Profile" : "Logout"}
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
               </Button>
             </div>
           </aside>
@@ -861,6 +1027,7 @@ export const CodingDashboard: React.FC = () => {
                   </h1>
                   <p className="text-xs text-zinc-500 font-medium mt-0.5">{relativeUpdateLabel}</p>
                 </div>
+<<<<<<< HEAD
               </div>
               <div className="flex items-center gap-2">
                 <Button
@@ -871,6 +1038,28 @@ export const CodingDashboard: React.FC = () => {
                   <Share2 className="h-4 w-4 text-emerald-400" />
                   Share Card
                 </Button>
+=======
+                <div className="flex flex-wrap items-center gap-2">
+                  {publicProfilePath && !readOnly ? (
+                    <Button
+                      variant="outline"
+                      className="gap-2 rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                      onClick={() => window.open(publicProfilePath, "_blank", "noopener,noreferrer")}
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                      Public Profile
+                    </Button>
+                  ) : null}
+                  <Button
+                    variant="outline"
+                    className="gap-2 rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-800 dark:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                    onClick={readOnly ? redirectToSignup : () => setShowProfileCard(true)}
+                  >
+                    <Share2 className="h-4 w-4" />
+                    Share
+                  </Button>
+                </div>
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
               </div>
             </div>
 
@@ -890,8 +1079,13 @@ export const CodingDashboard: React.FC = () => {
                     </CardHeader>
                     <CardFooter className="p-0 pt-6 justify-center">
                       <Button
+<<<<<<< HEAD
                         className="gap-2 rounded-xl bg-zinc-100 text-zinc-950 hover:bg-zinc-200 font-semibold px-5"
                         onClick={() => router.push("/dashboard/links")}
+=======
+                        className="gap-2 rounded-xl bg-black text-white hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                        onClick={readOnly ? redirectToSignup : () => router.push("/dashboard/links")}
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                       >
                         <UserRoundCog className="h-4 w-4" />
                         Configure Pipeline
@@ -1019,9 +1213,15 @@ export const CodingDashboard: React.FC = () => {
                               [&::-webkit-scrollbar]:h-2 
                               [&::-webkit-scrollbar-track]:bg-transparent 
                               [&::-webkit-scrollbar-thumb]:rounded-full 
+<<<<<<< HEAD
                               [&::-webkit-scrollbar-thumb]:bg-zinc-800 
                               hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
                               
+=======
+                              [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-800 
+                              hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
+
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                               <div className="flex gap-6 pb-2 pt-1 min-w-max">
                                 {githubMonths.map((month) => (
                                   <div key={month.key} className="flex flex-col space-y-2.5 shrink-0">
@@ -1062,6 +1262,7 @@ export const CodingDashboard: React.FC = () => {
                                 ))}
                               </div>
                             </div>
+<<<<<<< HEAD
                             
                             <div className="flex items-center gap-4 text-[10px] font-bold tracking-wider text-zinc-500 uppercase mt-4 justify-end bg-zinc-950/30 p-2.5 rounded-xl max-w-max ml-auto border border-zinc-900">
                               <span>Quiescent</span>
@@ -1073,6 +1274,18 @@ export const CodingDashboard: React.FC = () => {
                                 <div className="h-3 w-3 rounded-[3px] bg-blue-500" />
                               </div>
                               <span>Saturated</span>
+=======
+
+                            <Separator className="my-4 bg-zinc-200 dark:bg-zinc-800" />
+                            <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+                              <span>Less</span>
+                              <div className="h-3 w-3 rounded-sm bg-zinc-200 dark:bg-zinc-800" />
+                              <div className="h-3 w-3 rounded-sm bg-emerald-200 dark:bg-emerald-950" />
+                              <div className="h-3 w-3 rounded-sm bg-emerald-400 dark:bg-emerald-800" />
+                              <div className="h-3 w-3 rounded-sm bg-emerald-600" />
+                              <div className="h-3 w-3 rounded-sm bg-emerald-700 dark:bg-emerald-500" />
+                              <span>More</span>
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                             </div>
                           </>
                         ) : (
@@ -1196,6 +1409,7 @@ export const CodingDashboard: React.FC = () => {
                   })}
                 </div>
 
+<<<<<<< HEAD
                 {/* Main Interactive Graph & Performance Grid */}
                 <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
                   <Card className="rounded-3xl border-zinc-900 bg-zinc-950/40 shadow-xl backdrop-blur-md xl:col-span-8">
@@ -1210,16 +1424,105 @@ export const CodingDashboard: React.FC = () => {
                         </CardDescription>
                       </div>
                       <div className="flex flex-wrap gap-1.5 bg-zinc-950/80 p-1 rounded-xl border border-zinc-900">
+=======
+                <section className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm">
+                    <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-[15px] font-semibold text-zinc-700 dark:text-zinc-200">Total Questions</CardTitle>
+                      <BookOpenText className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{totalQuestions.toLocaleString()}</p>
+                      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Aggregated solved count</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm">
+                    <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-[15px] font-semibold text-zinc-700 dark:text-zinc-200">GFG Score</CardTitle>
+                      <Code className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                        {(gfgStats?.score ?? 0).toLocaleString()}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
+                        {gfgStats ? `${(gfgStats.totalSolved ?? 0).toLocaleString()} solved on GFG` : "Connect GFG handle"}
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm">
+                    <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-[15px] font-semibold text-zinc-700 dark:text-zinc-200">Active Days</CardTitle>
+                      <CalendarDays className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">{totalActiveDays.toLocaleString()}</p>
+                      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Days with submissions</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm">
+                    <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-[15px] font-semibold text-zinc-700 dark:text-zinc-200">GitHub Repos</CardTitle>
+                      <FolderGit2 className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-4xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                        {(githubStats?.publicRepos ?? 0).toLocaleString()}
+                      </p>
+                      <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{githubStats?.handle ?? "your account"}</p>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm">
+                    <CardHeader className="flex-row items-center justify-between space-y-0 pb-2">
+                      <CardTitle className="text-[15px] font-semibold text-zinc-700 dark:text-zinc-200">Last Active</CardTitle>
+                      <Clock3 className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-2 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                        <span className={`h-2.5 w-2.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-zinc-400"}`} />
+                        {lastActiveDate ? formatDatePretty(lastActiveDate) : "No activity"}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </section>
+
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                  <Card className="overflow-hidden rounded-2xl border-zinc-200 bg-white/80 shadow-sm backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/60 xl:col-span-8">
+                    <CardHeader className="flex-row items-start justify-between space-y-0 border-0 pb-4">
+                      <div>
+                        <CardTitle className="flex items-center gap-2 text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                          <BarChart3 className="h-5 w-5 text-violet-500" />
+                          Platform Rating Trend
+                        </CardTitle>
+                        <CardDescription className="mt-2 text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                          {ratingByPlatform.size === 0 ? "No contest history" : ratingSummary.range}
+                        </CardDescription>
+                      </div>
+                      <div className="flex max-w-full flex-wrap justify-end gap-2">
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                         {[...ratingByPlatform.keys()].map((key) => (
                           <Button
                             key={key}
                             size="sm"
+<<<<<<< HEAD
                             variant={ratingPlatform === key ? "default" : "ghost"}
                             className={`h-7 rounded-lg text-xs font-bold px-3 transition ${
                               ratingPlatform === key
                                 ? "bg-zinc-800 text-white shadow-inner"
                                 : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900"
                             }`}
+=======
+                            variant={ratingPlatform === key ? "default" : "outline"}
+                            className={
+                              ratingPlatform === key
+                                ? "rounded-lg bg-zinc-950 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
+                                : "rounded-lg border-zinc-300 bg-white/80 text-zinc-700 hover:bg-zinc-100 dark:border-zinc-700 dark:bg-zinc-900/70 dark:text-zinc-200 dark:hover:bg-zinc-800"
+                            }
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                             onClick={() => setRatingPlatform(key)}
                           >
                             {formatPlatformName(key)}
@@ -1227,6 +1530,7 @@ export const CodingDashboard: React.FC = () => {
                         ))}
                       </div>
                     </CardHeader>
+<<<<<<< HEAD
                     <CardContent className="pt-6">
                       {ratingByPlatform.size === 0 ? (
                         <p className="text-xs text-zinc-500 font-medium py-12 text-center">
@@ -1256,6 +1560,146 @@ export const CodingDashboard: React.FC = () => {
                             </LineChart>
                           </ResponsiveContainer>
                         </div>
+=======
+                    <CardContent className="px-0">
+                      {ratingByPlatform.size === 0 ? (
+                        <p className="px-6 pb-6 text-sm text-zinc-500 dark:text-zinc-400">
+                          No rating history available yet. Add handles and participate in rated contests.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="px-6 pb-6">
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div className="text-3xl font-bold tracking-tight text-zinc-950 dark:text-zinc-50">
+                                {ratingSummary.latest?.rating.toLocaleString() ?? "N/A"}
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className={
+                                  ratingSummary.delta >= 0
+                                    ? "mb-1 gap-1 border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-400"
+                                    : "mb-1 gap-1 border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950 dark:text-rose-400"
+                                }
+                              >
+                                {ratingSummary.delta >= 0 ? (
+                                  <TrendingUp className="h-3 w-3" />
+                                ) : (
+                                  <TrendingDown className="h-3 w-3" />
+                                )}
+                                {ratingSummary.delta >= 0 ? "+" : ""}
+                                {ratingSummary.delta.toLocaleString()}
+                              </Badge>
+                              <div className="mb-1 text-sm text-zinc-500 dark:text-zinc-400">
+                                Max {ratingSummary.maxRating?.toLocaleString() ?? "N/A"}
+                              </div>
+                            </div>
+                            <p className="mt-2 max-w-xl truncate text-sm text-zinc-500 dark:text-zinc-400">
+                              Latest contest: {ratingSummary.latest?.contestName ?? ratingSummary.latest?.label ?? "Current rating"}
+                            </p>
+                          </div>
+
+                          <div className="relative">
+                            <ChartContainer
+                              config={ratingChartConfig}
+                              className="h-[320px] w-full overflow-visible ps-2 pe-6 [&_.recharts-curve.recharts-tooltip-cursor]:stroke-violet-500"
+                            >
+                              <ComposedChart
+                                data={selectedRatingData}
+                                margin={{
+                                  top: 24,
+                                  right: 20,
+                                  left: 0,
+                                  bottom: 24,
+                                }}
+                                style={{ overflow: "visible" }}
+                              >
+                                <defs>
+                                  <linearGradient id="ratingGradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor={ratingChartConfig.rating.color} stopOpacity={0.18} />
+                                    <stop offset="100%" stopColor={ratingChartConfig.rating.color} stopOpacity={0} />
+                                  </linearGradient>
+                                  <filter id="ratingDotShadow" x="-50%" y="-50%" width="200%" height="200%">
+                                    <feDropShadow dx="2" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.35)" />
+                                  </filter>
+                                </defs>
+
+                                <CartesianGrid
+                                  strokeDasharray="4 12"
+                                  stroke="var(--input)"
+                                  strokeOpacity={1}
+                                  horizontal={true}
+                                  vertical={false}
+                                />
+                                <XAxis
+                                  dataKey="label"
+                                  axisLine={false}
+                                  tickLine={false}
+                                  tick={{ fontSize: 12 }}
+                                  tickMargin={12}
+                                  minTickGap={24}
+                                  dy={10}
+                                />
+                                <YAxis
+                                  axisLine={false}
+                                  tickLine={false}
+                                  tick={{ fontSize: 12 }}
+                                  tickFormatter={(value) => `${Number(value)}`}
+                                  domain={["dataMin - 100", "dataMax + 100"]}
+                                  tickCount={6}
+                                  tickMargin={12}
+                                />
+                                <ChartTooltip
+                                  content={<RatingChartTooltip platform={ratingPlatform} />}
+                                  cursor={{
+                                    stroke: ratingChartConfig.rating.color,
+                                    strokeWidth: 1,
+                                  }}
+                                />
+                                <Area
+                                  type="linear"
+                                  dataKey="rating"
+                                  stroke="transparent"
+                                  fill="url(#ratingGradient)"
+                                  strokeWidth={0}
+                                  dot={false}
+                                />
+                                <Line
+                                  type="linear"
+                                  dataKey="rating"
+                                  name={`${formatPlatformName(ratingPlatform)} Rating`}
+                                  stroke={ratingChartConfig.rating.color}
+                                  strokeWidth={3}
+                                  dot={(props) => {
+                                    const { cx, cy, index } = props;
+                                    const isLatestPoint = index === selectedRatingData.length - 1;
+                                    if (!isLatestPoint) return <g key={`dot-${cx}-${cy}`} />;
+
+                                    return (
+                                      <circle
+                                        key={`dot-${cx}-${cy}`}
+                                        cx={cx}
+                                        cy={cy}
+                                        r={5.5}
+                                        fill={ratingChartConfig.rating.color}
+                                        stroke="white"
+                                        strokeWidth={2}
+                                        filter="url(#ratingDotShadow)"
+                                      />
+                                    );
+                                  }}
+                                  activeDot={{
+                                    r: 6,
+                                    fill: ratingChartConfig.rating.color,
+                                    stroke: "white",
+                                    strokeWidth: 2,
+                                    filter: "url(#ratingDotShadow)",
+                                  }}
+                                />
+                              </ComposedChart>
+                            </ChartContainer>
+                          </div>
+                        </>
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                       )}
                     </CardContent>
                   </Card>
@@ -1300,6 +1744,7 @@ export const CodingDashboard: React.FC = () => {
                   </Card>
                 </div>
 
+<<<<<<< HEAD
                 {/* Analytical Matrix Row 3: Grid Calendar & Section Arrays */}
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
                   <Card className="rounded-3xl border-zinc-900 bg-zinc-950/40 shadow-xl backdrop-blur-md xl:col-span-7">
@@ -1315,6 +1760,32 @@ export const CodingDashboard: React.FC = () => {
                       </div>
                       <div className="flex items-center gap-1.5 bg-zinc-950/80 p-1 rounded-xl border border-zinc-900">
                         {heatmapPage > 0 && (
+=======
+                <section className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+                  <Card className="rounded-2xl border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/60 shadow-sm backdrop-blur-sm xl:col-span-7">
+                    <CardHeader>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <CardTitle className="flex items-center gap-2 text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+                            <GitCompareArrows className="h-5 w-5 text-zinc-700 dark:text-zinc-300" />
+                            Submission Heatmap
+                          </CardTitle>
+                          <CardDescription className="text-sm text-zinc-500 dark:text-zinc-400">
+                            6-month submissions window ({heatmapRangeLabel}).
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {heatmapPage > 0 && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-xl border-zinc-300 dark:border-zinc-700 bg-white/80 dark:bg-zinc-900/70 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                              onClick={() => setHeatmapPage(0)}
+                            >
+                              Newer
+                            </Button>
+                          )}
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                           <Button
                             size="sm"
                             variant="ghost"
@@ -1340,9 +1811,15 @@ export const CodingDashboard: React.FC = () => {
                         [&::-webkit-scrollbar]:h-2 
                         [&::-webkit-scrollbar-track]:bg-transparent 
                         [&::-webkit-scrollbar-thumb]:rounded-full 
+<<<<<<< HEAD
                         [&::-webkit-scrollbar-thumb]:bg-zinc-800 
                         hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
                         
+=======
+                        [&::-webkit-scrollbar-thumb]:bg-zinc-300 dark:[&::-webkit-scrollbar-thumb]:bg-zinc-800 
+                        hover:[&::-webkit-scrollbar-thumb]:bg-zinc-400 dark:hover:[&::-webkit-scrollbar-thumb]:bg-zinc-700">
+
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
                         <div className="flex gap-6 pb-2 pt-1 min-w-max">
                           {heatmapMonths.map((month) => (
                             <div key={month.key} className="flex flex-col space-y-2.5 shrink-0">
@@ -1580,7 +2057,34 @@ export const CodingDashboard: React.FC = () => {
               </div>
             </div>
 
+<<<<<<< HEAD
             <div className="mt-6 flex gap-3 border-t border-zinc-800/80 pt-4">
+=======
+            {publicProfileUrl ? (
+              <div className="mt-4 rounded-xl border border-white/10 bg-white/10 p-3 text-sm">
+                <p className="mb-2 text-center text-zinc-400">Public URL</p>
+                <div className="flex items-center gap-2 rounded-lg bg-black/30 p-2">
+                  <p className="min-w-0 flex-1 truncate text-xs text-zinc-200">{publicProfileUrl}</p>
+                  <button
+                    className="rounded-md bg-white/10 p-2 transition hover:bg-white/20"
+                    onClick={() => handleCopyPublicUrl(publicProfileUrl)}
+                    aria-label="Copy public profile URL"
+                  >
+                    {copiedProfileUrl ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </button>
+                  <button
+                    className="rounded-md bg-white/10 p-2 transition hover:bg-white/20"
+                    onClick={() => window.open(publicProfileUrl, "_blank", "noopener,noreferrer")}
+                    aria-label="Open public profile"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex justify-between">
+>>>>>>> aff9ffd2243077f7360d977b9c4e79c38c83177a
               <Button
                 variant="secondary"
                 className="flex-1 rounded-xl bg-zinc-800 text-zinc-200 hover:bg-zinc-700 border border-zinc-700 font-semibold"
@@ -1602,3 +2106,10 @@ export const CodingDashboard: React.FC = () => {
     </TooltipProvider>
   );
 };
+
+const ratingChartConfig = {
+  rating: {
+    label: "Rating",
+    color: "var(--color-violet-500)",
+  },
+} satisfies ChartConfig;

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/app/lib/supabase/server';
+import { ensureUserProfile, getDefaultUsernameForUser } from '@/app/lib/user-profile';
 
 const PASSWORD_RECOVERY_COOKIE = 'codeatlas-password-recovery';
 
@@ -46,39 +47,24 @@ export async function GET(request: Request) {
 
         if (!sessionError && authData?.user) {
             const user = authData.user;
+            let profilePath: string | null = null;
 
             if (!isPasswordRecovery) {
                 //Generate the default username
-                let username = user.user_metadata?.username;
-                if (!username && user.email) {
-                    username = user.email.split('@')[0];
+                const username = getDefaultUsernameForUser(user);
+                if (username && user.user_metadata?.username !== username) {
                     await supabase.auth.updateUser({
                         data: { username: username }
                     });
                 }
 
-                // Check for user already exists or not in table
-                const { data: existingUser } = await supabase
-                    .from('users')
-                    .select('id')
-                    .eq('id', user.id)
-                    .single();
-
-                // If they don't exist, insert them!
-                if (!existingUser) {
-                    await supabase
-                        .from('users')
-                        .insert([
-                            {
-                                id: user.id, // Link it to the Supabase Auth ID
-                                email: user.email,
-                                username: username, // default username given 
-                            }
-                        ]);
+                const profile = await ensureUserProfile(user);
+                if (profile?.username) {
+                    profilePath = `/u/${encodeURIComponent(profile.username)}`;
                 }
             }
 
-            const redirectUrl = getRedirectUrl(request, origin, isPasswordRecovery ? '/update-password' : next);
+            const redirectUrl = getRedirectUrl(request, origin, isPasswordRecovery ? '/update-password' : profilePath ?? next);
             const response = NextResponse.redirect(redirectUrl);
 
             if (isPasswordRecovery) {

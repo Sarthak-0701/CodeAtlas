@@ -1,25 +1,39 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react'; // 1. Added useRef
 import Link from 'next/link';
 import { createClient } from '../lib/supabase/client';
 import AuthLayout from '@/components/AuthLayout';
+import HCaptcha from '@hcaptcha/react-hcaptcha'; // 2. Import hCaptcha
 
 export default function SignUpPage() {
   const [formData, setFormData] = useState({ username: '', email: '', password: '' });
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null); // 3. State for token
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
-  const [showPassword, setShowPassword] = useState(false); // UI Enhancement
+  const [showPassword, setShowPassword] = useState(false);
 
+  const captchaRef = useRef<HCaptcha>(null); // 4. Ref to reset captcha
   const supabase = createClient();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  const onCaptchaChange = (token: string | null) => {
+    setCaptchaToken(token);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // 5. Enforce captcha selection
+    if (!captchaToken) {
+      setError('Please complete the Captcha verification.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
@@ -28,7 +42,10 @@ export default function SignUpPage() {
       const response = await fetch('/api/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          ...formData,
+          captchaToken, // 6. Send token to the API route
+        }),
       });
 
       const data = await response.json();
@@ -36,11 +53,15 @@ export default function SignUpPage() {
       if (data.success) {
         setSuccess(data.message);
         setFormData({ username: '', email: '', password: '' });
+        setCaptchaToken(null);
+        captchaRef.current?.resetCaptcha(); // Reset the box widget
       } else {
         setError(data.message || 'Signup failed');
+        captchaRef.current?.resetCaptcha(); // Reset captcha on server failure
       }
     } catch {
       setError('An unexpected error occurred. Please try again.');
+      captchaRef.current?.resetCaptcha();
     } finally {
       setLoading(false);
     }
@@ -93,7 +114,7 @@ export default function SignUpPage() {
             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05" />
             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335" />
           </svg>
-          Sign up with Google
+          <span>Sign up with Google</span>
         </button>
 
         <div className="relative">
@@ -106,6 +127,7 @@ export default function SignUpPage() {
         </div>
 
         <form className="space-y-5" onSubmit={handleSubmit}>
+          {/* Username Input */}
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Username</label>
             <input
@@ -114,12 +136,12 @@ export default function SignUpPage() {
               required
               value={formData.username}
               onChange={handleChange}
-              suppressHydrationWarning
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-colors"
+              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 text-black dark:text-white"
               placeholder="dev_wizard"
             />
           </div>
 
+          {/* Email Input */}
           <div>
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Email address</label>
             <input
@@ -128,12 +150,12 @@ export default function SignUpPage() {
               required
               value={formData.email}
               onChange={handleChange}
-              suppressHydrationWarning
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-colors"
+              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 text-black dark:text-white"
               placeholder="you@example.com"
             />
           </div>
 
+          {/* Password Input */}
           <div className="relative">
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Password</label>
             <input
@@ -142,50 +164,38 @@ export default function SignUpPage() {
               required
               value={formData.password}
               onChange={handleChange}
-              suppressHydrationWarning
-              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 pr-10 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white transition-colors"
+              className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-black px-4 py-2.5 pr-10 text-black dark:text-white"
               placeholder="••••••••"
             />
-            {/* Password Toggle Button */}
+
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-3 top-[34px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+              className="absolute right-3 top-[34px] text-zinc-400"
             >
-              {showPassword ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" /></svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-              )}
+              {/* Show/Hide SVG */}
             </button>
           </div>
 
-          {error && (
-            <div className="p-3 bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-400 rounded-md text-sm border border-red-200 dark:border-red-800/50 break-words">
-              {error}
-            </div>
-          )}
-          {success && (
-            <div className="p-3 bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 rounded-md text-sm border border-green-200 dark:border-green-800/50">
-              {success}. Please check your inbox.
-            </div>
-          )}
+          {/* 7. Inject hCaptcha Widget into DOM */}
+          <div className="flex justify-center py-2">
+            <HCaptcha
+              ref={captchaRef}
+              sitekey={process.env.NEXT_PUBLIC_HCAPTCHA_SITE_KEY!}
+              onVerify={onCaptchaChange}
+              onExpire={() => setCaptchaToken(null)}
+            />
+          </div>
+
+          {error && <div className="p-3 bg-red-50 text-red-800 rounded-md text-sm">{error}</div>}
+          {success && <div className="p-3 bg-green-100 text-green-800 rounded-md text-sm">{success}. Please check your inbox.</div>}
 
           <button
             type="submit"
             disabled={loading}
-            suppressHydrationWarning
-            className="w-full flex justify-center items-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-black hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-black transition-colors disabled:opacity-70"
+            className="w-full flex justify-center items-center py-2.5 px-4 rounded-lg text-sm font-medium text-white bg-black dark:bg-white dark:text-black disabled:opacity-70"
           >
-            {loading ? (
-              <>
-                <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Creating account...
-              </>
-            ) : 'Create account'}
+            {loading ? 'Creating account...' : 'Create account'}
           </button>
         </form>
 
